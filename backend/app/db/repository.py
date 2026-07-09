@@ -219,10 +219,25 @@ class MarketDataRepository:
                         gamma_market_id = EXCLUDED.gamma_market_id,
                         outcome_index = EXCLUDED.outcome_index,
                         outcome = EXCLUDED.outcome,
-                        mapping_status = EXCLUDED.mapping_status,
-                        mapping_error = EXCLUDED.mapping_error,
-                        verified_at = EXCLUDED.verified_at,
-                        raw = EXCLUDED.raw,
+                        mapping_status = CASE
+                            WHEN market_tokens.mapping_status = 'verified'
+                                AND EXCLUDED.mapping_status = 'mapped'
+                            THEN market_tokens.mapping_status
+                            ELSE EXCLUDED.mapping_status
+                        END,
+                        mapping_error = CASE
+                            WHEN market_tokens.mapping_status = 'verified'
+                                AND EXCLUDED.mapping_status = 'mapped'
+                            THEN market_tokens.mapping_error
+                            ELSE EXCLUDED.mapping_error
+                        END,
+                        verified_at = CASE
+                            WHEN market_tokens.mapping_status = 'verified'
+                                AND EXCLUDED.mapping_status = 'mapped'
+                            THEN market_tokens.verified_at
+                            ELSE EXCLUDED.verified_at
+                        END,
+                        raw = market_tokens.raw || EXCLUDED.raw,
                         source = EXCLUDED.source,
                         ingestion_run_id = EXCLUDED.ingestion_run_id,
                         updated_at = now()
@@ -232,6 +247,39 @@ class MarketDataRepository:
             )
             count += 1
         return count
+
+    def update_token_mapping(
+        self,
+        *,
+        token_id: str,
+        run_id: str,
+        mapping_status: str,
+        mapping_error: str | None,
+        verified_at: datetime | None,
+        raw: Mapping[str, Any],
+    ) -> None:
+        self.connection.execute(
+            text(
+                """
+                UPDATE market_tokens
+                SET mapping_status = :mapping_status,
+                    mapping_error = :mapping_error,
+                    verified_at = :verified_at,
+                    raw = raw || CAST(:raw AS jsonb),
+                    ingestion_run_id = :run_id,
+                    updated_at = now()
+                WHERE token_id = :token_id
+                """
+            ),
+            {
+                "token_id": token_id,
+                "run_id": run_id,
+                "mapping_status": mapping_status,
+                "mapping_error": mapping_error,
+                "verified_at": verified_at,
+                "raw": _json(raw),
+            },
+        )
 
     def insert_liquidity_snapshots(
         self, snapshots: Iterable[Mapping[str, Any]], run_id: str

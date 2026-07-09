@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     market_ingestion_max_markets: int = 500
     market_ingestion_holders_market_limit: int = 25
     market_ingestion_holders_limit: int = 50
+    market_ingestion_target_categories: str = "Politics,Finance,Tech"
+    market_ingestion_token_verification_limit: int = 100
 
 
 @lru_cache

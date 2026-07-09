@@ -48,3 +48,15 @@ For a smoke test, keep the run small:
 ```bash
 python -m backend.scripts.ingest_market_data --max-markets 5 --page-limit 5 --holders-market-limit 2 --holders-limit 3
 ```
+
+Useful controls:
+
+```bash
+python -m backend.scripts.ingest_market_data \
+  --max-markets 500 \
+  --categories Politics,Finance,Tech \
+  --token-verification-limit 100
+```
+
+When Gamma omits category fields, the worker keeps those markets and records an ingestion warning
+instead of silently dropping the batch.

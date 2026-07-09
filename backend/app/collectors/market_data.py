@@ -178,6 +178,31 @@ def normalize_market_bundle(
     return market, normalized_events, tokens
 
 
+def market_category(raw: Mapping[str, Any]) -> str | None:
+    if raw.get("category"):
+        return str(raw["category"])
+    embedded_events = [event for event in raw.get("events", []) if isinstance(event, Mapping)]
+    for event in embedded_events:
+        if event.get("category"):
+            return str(event["category"])
+    return None
+
+
+def parse_categories(value: str | None) -> set[str]:
+    if value is None:
+        return set()
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+def market_matches_categories(raw: Mapping[str, Any], categories: set[str]) -> bool:
+    if not categories:
+        return True
+    category = market_category(raw)
+    if category is None:
+        return True
+    return category.lower() in categories
+
+
 def normalize_market_snapshot(raw: Mapping[str, Any], run_id: str, snapshot_at: datetime) -> dict[str, Any] | None:
     condition_id = raw.get("conditionId") or raw.get("condition_id")
     if not condition_id:
@@ -305,22 +330,44 @@ class MarketDataIngestion:
         page_limit: int | None = None,
         holders_market_limit: int | None = None,
         holders_limit: int | None = None,
+        categories: str | None = None,
+        token_verification_limit: int | None = None,
     ) -> IngestionResult:
         run_id = new_run_id("market_data")
         started_at = utc_now()
-        max_markets = max_markets or self.settings.market_ingestion_max_markets
-        page_limit = page_limit or self.settings.market_ingestion_page_limit
-        holders_market_limit = (
-            holders_market_limit or self.settings.market_ingestion_holders_market_limit
+        max_markets = (
+            self.settings.market_ingestion_max_markets if max_markets is None else max_markets
         )
-        holders_limit = holders_limit or self.settings.market_ingestion_holders_limit
+        page_limit = (
+            self.settings.market_ingestion_page_limit if page_limit is None else page_limit
+        )
+        holders_market_limit = (
+            self.settings.market_ingestion_holders_market_limit
+            if holders_market_limit is None
+            else holders_market_limit
+        )
+        holders_limit = (
+            self.settings.market_ingestion_holders_limit if holders_limit is None else holders_limit
+        )
+        category_filter = parse_categories(
+            self.settings.market_ingestion_target_categories if categories is None else categories
+        )
+        token_verification_limit = (
+            self.settings.market_ingestion_token_verification_limit
+            if token_verification_limit is None
+            else token_verification_limit
+        )
         counters: dict[str, int] = {
             "events": 0,
             "markets": 0,
             "tokens": 0,
+            "token_verifications": 0,
+            "token_mapping_failures": 0,
             "liquidity_snapshots": 0,
             "holders": 0,
             "raw_responses": 0,
+            "market_pages": 0,
+            "uncategorized_markets": 0,
         }
         warnings: list[str] = []
         params = {
@@ -328,6 +375,8 @@ class MarketDataIngestion:
             "page_limit": page_limit,
             "holders_market_limit": holders_market_limit,
             "holders_limit": holders_limit,
+            "categories": sorted(category_filter),
+            "token_verification_limit": token_verification_limit,
         }
 
         with self.engine.begin() as connection:
@@ -336,16 +385,21 @@ class MarketDataIngestion:
             try:
                 async with httpx.AsyncClient(timeout=self.settings.api_probe_timeout_seconds) as client:
                     markets_payloads = await self._fetch_market_pages(
-                        client, run_id, repository, max_markets, page_limit
+                        client, run_id, repository, max_markets, page_limit, category_filter, warnings
                     )
                     markets_raw = [
                         market
                         for payload in markets_payloads
                         for market in first_list(payload, "markets")
-                        if isinstance(market, Mapping)
+                        if isinstance(market, Mapping) and market_matches_categories(market, category_filter)
                     ][:max_markets]
+                    uncategorized_count = sum(1 for market in markets_raw if market_category(market) is None)
+                    counters["uncategorized_markets"] += uncategorized_count
+                    if uncategorized_count and category_filter:
+                        warnings.append("gamma_market_category_missing_retained_for_ingestion")
                     events_raw = await self._fetch_events_page(client, run_id, repository, page_limit)
                     counters["raw_responses"] += len(markets_payloads) + 1
+                    counters["market_pages"] += len(markets_payloads)
 
                     normalized_events = [
                         event
@@ -371,6 +425,15 @@ class MarketDataIngestion:
                     )
                     counters["markets"] += repository.upsert_markets(normalized_markets, run_id)
                     counters["tokens"] += repository.upsert_tokens(normalized_tokens, run_id)
+                    token_verification_counters = await self._verify_tokens(
+                        client,
+                        repository,
+                        run_id,
+                        normalized_tokens[:token_verification_limit],
+                    )
+                    counters["token_verifications"] += token_verification_counters["verified"]
+                    counters["token_mapping_failures"] += token_verification_counters["failed"]
+                    counters["raw_responses"] += token_verification_counters["raw_responses"]
                     counters["liquidity_snapshots"] += repository.insert_liquidity_snapshots(
                         market_snapshots, run_id
                     )
@@ -449,16 +512,20 @@ class MarketDataIngestion:
         repository: MarketDataRepository,
         max_markets: int,
         page_limit: int,
+        category_filter: set[str],
+        warnings: list[str],
     ) -> list[Any]:
         gamma_base = str(self.settings.polymarket_gamma_base_url).rstrip("/")
         payloads: list[Any] = []
         cursor: str | None = None
         seen_cursors: set[str] = set()
         seen_first_ids: set[str] = set()
-        while len([item for payload in payloads for item in first_list(payload, "markets")]) < max_markets:
-            params: dict[str, Any] = {"limit": min(page_limit, max_markets), "active": "true"}
+        matched_count = 0
+        max_pages = 200
+        while matched_count < max_markets:
+            params: dict[str, Any] = {"limit": page_limit, "active": "true"}
             if cursor:
-                params["next_cursor"] = cursor
+                params["after_cursor"] = cursor
             payload = await self._fetch_json(
                 client,
                 repository,
@@ -475,14 +542,21 @@ class MarketDataIngestion:
             first_id = str(markets[0].get("id")) if isinstance(markets[0], Mapping) else ""
             next_cursor = payload.get("next_cursor") if isinstance(payload, dict) else None
             if first_id in seen_first_ids:
+                warnings.append("gamma_markets_keyset_repeated_first_id")
                 break
             seen_first_ids.add(first_id)
             payloads.append(payload)
+            matched_count += sum(
+                1
+                for market in markets
+                if isinstance(market, Mapping) and market_matches_categories(market, category_filter)
+            )
             if not next_cursor or next_cursor in seen_cursors:
                 break
             seen_cursors.add(str(next_cursor))
             cursor = str(next_cursor)
-            if len(payloads) >= 50:
+            if len(payloads) >= max_pages:
+                warnings.append("gamma_markets_keyset_max_pages_reached")
                 break
         return payloads
 
@@ -541,6 +615,68 @@ class MarketDataIngestion:
             body=payload,
         )
         return payload
+
+    async def _verify_tokens(
+        self,
+        client: httpx.AsyncClient,
+        repository: MarketDataRepository,
+        run_id: str,
+        tokens: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        counters = {"verified": 0, "failed": 0, "raw_responses": 0}
+        clob_base = str(self.settings.polymarket_clob_base_url).rstrip("/")
+        for token in tokens:
+            token_id = token["token_id"]
+            started = time.perf_counter()
+            response = await client.get(f"{clob_base}/markets-by-token/{token_id}")
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"body": response.text[:1000]}
+            repository.record_raw_response(
+                run_id=run_id,
+                source="clob",
+                endpoint=f"{clob_base}/markets-by-token/{{token_id}}",
+                request_params={"token_id": token_id},
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                row_count=1 if response.is_success else 0,
+                captured_at=utc_now(),
+                body=payload,
+            )
+            counters["raw_responses"] += 1
+            expected_condition_id = token["condition_id"]
+            verified_token_ids = {
+                str(payload.get("primary_token_id")),
+                str(payload.get("secondary_token_id")),
+            }
+            actual_condition_id = payload.get("condition_id")
+            if (
+                response.is_success
+                and str(actual_condition_id) == expected_condition_id
+                and token_id in verified_token_ids
+            ):
+                repository.update_token_mapping(
+                    token_id=token_id,
+                    run_id=run_id,
+                    mapping_status="verified",
+                    mapping_error=None,
+                    verified_at=utc_now(),
+                    raw={"clob_markets_by_token": payload},
+                )
+                counters["verified"] += 1
+            else:
+                repository.update_token_mapping(
+                    token_id=token_id,
+                    run_id=run_id,
+                    mapping_status="failed",
+                    mapping_error="clob_markets_by_token_mismatch",
+                    verified_at=utc_now() if response.is_success else None,
+                    raw={"clob_markets_by_token": payload},
+                )
+                counters["failed"] += 1
+        return counters
 
 
 def _dedupe_by(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

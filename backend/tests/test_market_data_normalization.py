@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from backend.app.collectors.market_data import (
+    market_matches_categories,
     normalize_holders,
     normalize_live_volume_snapshots,
     normalize_market_bundle,
     parse_datetime,
+    parse_categories,
     parse_decimal,
     parse_json_array,
 )
@@ -17,6 +19,11 @@ def test_parse_json_array_accepts_gamma_string_fields() -> None:
     assert parse_json_array('["Yes", "No"]') == ["Yes", "No"]
     assert parse_json_array("a,b") == ["a", "b"]
     assert parse_json_array(None) == []
+
+
+def test_parse_categories_normalizes_csv_values() -> None:
+    assert parse_categories("Politics, Finance,Tech") == {"politics", "finance", "tech"}
+    assert parse_categories("") == set()
 
 
 def test_parse_datetime_normalizes_milliseconds_to_utc() -> None:
@@ -67,6 +74,17 @@ def test_normalize_market_bundle_maps_tokens_by_outcome_order() -> None:
         ("111", "Yes", "mapped"),
         ("222", "No", "mapped"),
     ]
+
+
+def test_market_matches_embedded_event_category() -> None:
+    raw = {"events": [{"category": "Finance"}]}
+    assert market_matches_categories(raw, {"finance"})
+    assert not market_matches_categories(raw, {"sports"})
+    assert market_matches_categories(raw, set())
+
+
+def test_market_matches_categories_keeps_uncategorized_markets() -> None:
+    assert market_matches_categories({"events": [{}]}, {"politics", "finance", "tech"})
 
 
 def test_normalize_market_bundle_marks_mismatched_mapping_failed() -> None:

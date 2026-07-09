@@ -129,7 +129,7 @@ ssh usa
 
 ## Week02 当前进展
 
-已完成第一条可运行纵切：
+已完成 Week02 核心验收：
 
 1. PostgreSQL schema v1：
    - `ingestion_runs`
@@ -144,26 +144,26 @@ ssh usa
 3. 市场数据采集 worker：
    - `python -m backend.scripts.ingest_market_data`
    - 支持 Gamma markets/events、token 映射、OI、live volume、holders、raw response 入库。
-4. 本地小批真实采集已验证：
-   - 连续运行 2 次后，`markets=5`、`market_tokens=10` 未重复膨胀。
+4. 本地真实采集已验证：
+   - 500 个 market、1000 个 token 入库成功。
+   - 抽样 100 个 token 调用 CLOB `markets-by-token/{token_id}` 校验，失败数为 0。
+   - 2500 条 holder 快照和 526 条容量快照入库。
+   - 重复运行后 `markets=500`、`market_tokens=1000` 未重复膨胀。
    - run-scoped snapshots、holders、raw responses 按批次保留。
-   - token 映射失败数为 0。
 5. 测试：
-   - `pytest -q`：10 passed。
+   - `pytest -q`：13 passed。
    - `ruff check .`：通过。
 
 验收报告见 `docs/market-data-ingestion-report.md`。
 
-## 下一步：继续 Week02
+## 下一步：Week02 收尾或进入 Week03
 
 优先事项：
 
-1. 针对 Gamma keyset cursor 做更大规模分页验证。
-2. 将采集规模提升到至少 500 个市场或当前目标市场全集。
-3. 增加 token 到 CLOB `markets-by-token/{token_id}` 或可用等价端点的抽样校验。
-4. 为 raw API response 增加更细的字段稳定性测试。
-5. 补全目标分类 Politics、Finance、Tech 的筛选策略。
-6. 暂不做 PnL、评分、真实下单或复杂 dashboard。
+1. Gamma active market 当前缺失 category/tag 字段；已实现“有分类则过滤、缺失则保留并告警”。后续可通过 event/tag 详情端点做分类补全。
+2. 为 raw API response 增加更细的字段稳定性测试。
+3. 进入 Week03 钱包发现与历史行为回填前，保留当前只读边界。
+4. 暂不做 PnL、评分、真实下单或复杂 dashboard。
 
 下次会话建议提示：
 
