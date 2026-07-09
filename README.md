@@ -39,6 +39,20 @@ Price and order book archive after Week05 schema migration:
 python -m backend.scripts.archive_price_data --token-limit 100
 python -m backend.scripts.archive_price_data --tokens <clob_token_id> --token-limit 1 --depth-limit 3
 python -m backend.scripts.archive_price_data --tokens <clob_token_id> --skip-history --skip-orderbook --websocket --websocket-seconds 30
+python -m backend.scripts.archive_price_data --skip-history --skip-orderbook --calculate-clv --clv-limit 1000
+```
+
+For a 24-hour watchlist archive, run with explicit watchlist tokens:
+
+```bash
+python -m backend.scripts.archive_price_data \
+  --tokens <comma_separated_watchlist_tokens> \
+  --skip-history \
+  --orderbook-cycles 2880 \
+  --orderbook-interval-seconds 30 \
+  --websocket \
+  --websocket-seconds 86400 \
+  --websocket-event-limit 1000000
 ```
 
 Run the read-only API probe:

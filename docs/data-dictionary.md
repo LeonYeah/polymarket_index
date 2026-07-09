@@ -145,6 +145,20 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `orderbook_depth_snapshots.cumulative_size` | decimal | Derived | Cumulative size through this level. |
 | `orderbook_depth_snapshots.cumulative_notional` | decimal | Derived | Cumulative price * size through this level. |
 
+## Followability
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `market_followability_snapshots.snapshot_uid` | string | Derived | Same ID as the source order book snapshot. |
+| `market_followability_snapshots.estimated_buy_slippage` | decimal | Derived | Conservative buy-side slippage for configured size. |
+| `market_followability_snapshots.estimated_sell_slippage` | decimal | Derived | Conservative sell-side slippage for configured size. |
+| `market_followability_snapshots.buy_fillable/sell_fillable` | boolean | Derived | Whether retained depth can fill configured size. |
+| `market_followability_snapshots.spread_too_wide` | boolean | Derived | True when spread bps exceeds configured threshold. |
+| `market_followability_snapshots.depth_insufficient` | boolean | Derived | True when either side cannot fill configured size. |
+| `market_followability_snapshots.price_missing` | boolean | Derived | True when top bid, ask, or midpoint is unavailable. |
+| `market_followability_snapshots.market_liquidity_score` | decimal | Derived | 0-100 conservative score from spread and retained depth. |
+| `market_followability_snapshots.signal_to_snapshot_delay_seconds` | integer | Derived | Optional signal-to-snapshot delay when a signal time is supplied. |
+
 ## Market Stream
 
 | Field | Type | Source | Notes |
@@ -166,3 +180,5 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `reference_price` | decimal | Derived | Prefer delay-adjusted midpoint; fallback to `price_points.price`. |
 | `future_price` | decimal | Derived | Future midpoint or price point at target horizon. |
 | `clv_30s/2m/10m/1h/24h` | decimal | Derived | `future_price - reference_price` for buys; sign reversed for sells. |
+| `trade_clv_metrics.reference_source` | string | Derived | `orderbook_midpoint` preferred; `price_history` fallback. |
+| `trade_clv_metrics.missing_reason` | string | Derived | `missing_reference_price` or `missing_future_prices` when CLV cannot be computed. |

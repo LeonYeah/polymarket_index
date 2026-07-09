@@ -60,6 +60,8 @@ def test_schema_contains_week05_price_archive_tables() -> None:
         "orderbook_top",
         "orderbook_depth_snapshots",
         "market_stream_events",
+        "market_followability_snapshots",
+        "trade_clv_metrics",
     ]:
         assert f"CREATE TABLE IF NOT EXISTS {table_name}" in SCHEMA_SQL
 

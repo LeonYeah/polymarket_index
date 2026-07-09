@@ -53,8 +53,14 @@ class Settings(BaseSettings):
     price_archive_history_interval: str = "1d"
     price_archive_history_fidelity: int | None = None
     price_archive_orderbook_depth_limit: int = 20
+    price_archive_orderbook_interval_seconds: float = 30.0
+    price_archive_orderbook_cycles: int = 1
     price_archive_websocket_seconds: float = 30.0
     price_archive_websocket_event_limit: int = 100
+    price_archive_clv_limit: int = 1000
+    price_archive_clv_reference_delay_seconds: int = 0
+    price_archive_followability_size: str = "10"
+    price_archive_followability_max_spread_bps: str = "500"
 
 
 @lru_cache

@@ -2,7 +2,7 @@
 
 更新时间：2026-07-09
 
-下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md`。当前主线是完成 Week05 的正式 100 市场与 24 小时归档验收，然后进入 Week06。
+下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week06-SmartScore与统计回测.md`。当前主线可进入 Week06；如需更严谨生产验收，可先在 VPS 跑 Week05 的 24 小时 watchlist 归档。
 
 ## 目标与边界
 
@@ -21,7 +21,7 @@
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
 - Python venv：`codes/.venv`
 - VPS 登录：`ssh usa`
-- 最新阶段：Week05 价格与订单簿归档基础闭环已实现，具体提交以 `git log --oneline -5` 为准。
+- 最新阶段：Week05 价格与订单簿归档已完成工程与短验收，具体提交以 `git log --oneline -5` 为准。
 - VPS 状态：`/home/lee/workspace/search/codes` 是空 Git 仓库，没有需要提交的代码。
 
 ## 当前架构
@@ -102,13 +102,13 @@ PnL 引擎与对账：
 
 价格与订单簿归档：
 
-- 已建表：`price_points`、`orderbook_snapshots`、`orderbook_top`、`orderbook_depth_snapshots`、`market_stream_events`。
-- 已实现 CLOB `prices-history` 回填、`book` 快照归档、market WebSocket 短时归档。
+- 已建表：`price_points`、`orderbook_snapshots`、`orderbook_top`、`orderbook_depth_snapshots`、`market_stream_events`、`market_followability_snapshots`、`trade_clv_metrics`。
+- 已实现 CLOB `prices-history` 回填、`book` 快照归档、market WebSocket 归档和多轮订单簿循环采样。
 - 订单簿归档拆出 best_bid、best_ask、midpoint、spread、spread_bps、top depth、有限档深度。
 - WebSocket 事件同时保留 `received_at` 与 payload 原始事件时间 `event_at`，raw payload 入库。
-- 已实现 CLV 基础函数，按 BUY/SELL 调整符号；已实现保守订单簿滑点估算函数。
+- 已实现 CLV 基础函数和批量物化，按 BUY/SELL 调整符号；已实现保守订单簿滑点估算和可跟随性评分。
 - CLI：`python -m backend.scripts.archive_price_data --token-limit 100`。
-- Week05 smoke：1 token 写入 `price_points=1440`、`orderbook_snapshots=1`、`orderbook_depth_snapshots=6`；2 秒 WebSocket 写入 `market_stream_events=1`。
+- Week05 验收数据：100 token 价格历史回填 `price_points=144101` attempted、失败 0；5 token/3 轮订单簿短连续归档 `orderbook_snapshots=15`、`orderbook_depth_snapshots=150`、`followability_snapshots=15`；10 秒 WebSocket 写入 `market_stream_events=10`、重连 0；CLV 物化 `trade_clv_metrics=200`，其中 19 条有至少一种非空 CLV。
 
 ## 关键口径
 
@@ -126,10 +126,8 @@ PnL 引擎与对账：
 
 下一阶段主线：
 
-- Week05 基础代码已实现，但尚未完成 100 个活跃市场价格历史正式回填验收。
-- 尚未完成 watchlist 市场 24 小时连续订单簿/WebSocket 归档验收。
-- CLV 目前是基础函数，尚未批量物化到 Week03/Week04 历史交易。
-- 尚未把 Week05 订单簿滑点、spread/depth 接入 PnL enrichment 和容量分析。
+- Week05 的 24 小时 watchlist 长跑命令形态已具备，但当前会话只做了短连续验收，没有实际等待完整 24 小时。
+- 尚未把 Week05 订单簿滑点、spread/depth 回写到 Week04 PnL enrichment；Week06 可先直接读取 `trade_clv_metrics` 和 `market_followability_snapshots`。
 
 分析能力：
 
@@ -179,6 +177,7 @@ python -m backend.scripts.calculate_pnl --wallet-limit 5 --profile-limit 2
 # 价格与订单簿 smoke
 python -m backend.scripts.archive_price_data --tokens <clob_token_id> --token-limit 1 --depth-limit 3
 python -m backend.scripts.archive_price_data --tokens <clob_token_id> --skip-history --skip-orderbook --websocket --websocket-seconds 2 --websocket-event-limit 2
+python -m backend.scripts.archive_price_data --skip-history --skip-orderbook --calculate-clv --clv-limit 1000
 
 # API
 uvicorn backend.app.main:app --reload
@@ -192,20 +191,20 @@ docker compose -f infra/docker-compose.yml down
 
 ## 下一步建议
 
-完成 Week05 正式验收并准备进入 Week06。
+进入 Week06：SmartScore 与统计回测。
 
 建议顺序：
 
-1. 跑 `python -m backend.scripts.archive_price_data --token-limit 100`，完成 100 token 价格历史正式回填。
-2. 对 watchlist 跑较长时间 `--websocket` 和订单簿快照归档，记录断线/重连情况。
-3. 为历史 trades 增加 CLV 批量物化 job 或查询 API。
-4. 将订单簿滑点和 spread/depth 接入 PnL v1 的 `estimated_slippage` 或画像 enrichment。
-5. 验收通过后进入 Week06：SmartScore 与统计回测。
+1. 阅读 `../polymarket-wallet-tracker-plan/Week06-SmartScore与统计回测.md`。
+2. SmartScore 输入优先使用 `wallet_market_results`、`trade_clv_metrics`、`market_followability_snapshots`、`wallet_daily_equity`。
+3. 回测前确认 CLV 缺失率；必要时针对高价值 trade token 补跑 `archive_price_data --tokens ...`。
+4. 如需生产级 Week05 验收，在 VPS/tmux/systemd 跑 24 小时 watchlist 归档并记录重连次数和每小时写入量。
+5. 暂不引入真实下单、签名、私钥或交易凭证。
 
 下次会话可直接提示：
 
 ```text
-请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md。
-当前 Week01-Week04 已完成；Week05 已实现价格历史、订单簿、WebSocket 归档基础闭环和 CLV/滑点基础函数，但尚未完成 100 token 与 24 小时连续归档正式验收。
-请继续完成 Week05 验收或准备 Week06 SmartScore 与统计回测。保持只读边界，不要加入私钥、签名、真实下单或交易凭证。
+请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week06-SmartScore与统计回测.md。
+当前 Week01-Week05 已完成工程闭环：只读 API 探针、市场采集、钱包回填、PnL、价格历史、订单簿、WebSocket、followability、CLV 物化。Week05 已完成 100 token 价格回填和短连续归档验收；未实际等待 24 小时 watchlist 长跑。
+请进入 Week06 SmartScore 与统计回测。保持只读边界，不要加入私钥、签名、真实下单或交易凭证。
 ```

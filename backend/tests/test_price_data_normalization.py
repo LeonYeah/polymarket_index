@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from backend.app.collectors.price_data import (
     calculate_clv,
+    calculate_followability_snapshot,
     calculate_trade_clv,
     estimate_slippage,
     normalize_book_side,
@@ -120,3 +121,62 @@ def test_estimate_slippage_uses_book_depth_conservatively() -> None:
     assert result["filled"] is True
     assert result["avg_price"] == Decimal("0.41")
     assert result["slippage"] == Decimal("0.01")
+
+
+def test_followability_snapshot_flags_wide_spread_and_depth() -> None:
+    _, top, depth_rows = normalize_orderbook(
+        {
+            "market": "0xmarket",
+            "asset_id": "111",
+            "timestamp": "1788249600000",
+            "hash": "abc",
+            "bids": [{"price": "0.30", "size": "2"}],
+            "asks": [{"price": "0.50", "size": "1"}],
+        },
+        run_id="run-1",
+        snapshot_at=datetime(2026, 9, 1, tzinfo=UTC),
+        depth_limit=2,
+    )
+
+    row = calculate_followability_snapshot(
+        top=top,
+        depth_rows=depth_rows,
+        requested_size=Decimal("10"),
+        max_spread_bps=Decimal("500"),
+    )
+
+    assert row["price_missing"] is False
+    assert row["spread_too_wide"] is True
+    assert row["depth_insufficient"] is True
+    assert row["buy_fillable"] is False
+    assert row["sell_fillable"] is False
+    assert row["market_liquidity_score"] == Decimal("0")
+
+
+def test_followability_snapshot_scores_fillable_tight_book() -> None:
+    _, top, depth_rows = normalize_orderbook(
+        {
+            "market": "0xmarket",
+            "asset_id": "111",
+            "timestamp": "1788249600000",
+            "hash": "abc",
+            "bids": [{"price": "0.49", "size": "20"}],
+            "asks": [{"price": "0.51", "size": "20"}],
+        },
+        run_id="run-1",
+        snapshot_at=datetime(2026, 9, 1, tzinfo=UTC),
+        depth_limit=2,
+    )
+
+    row = calculate_followability_snapshot(
+        top=top,
+        depth_rows=depth_rows,
+        requested_size=Decimal("10"),
+        max_spread_bps=Decimal("500"),
+    )
+
+    assert row["spread_too_wide"] is False
+    assert row["depth_insufficient"] is False
+    assert row["buy_fillable"] is True
+    assert row["sell_fillable"] is True
+    assert row["market_liquidity_score"] == Decimal("60.00")

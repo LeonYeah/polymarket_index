@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week05_price_archive_schema_v1"
+SCHEMA_VERSION = "2026_07_09_week05_price_archive_schema_v2"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -535,6 +535,71 @@ CREATE INDEX IF NOT EXISTS market_stream_events_asset_received_idx
     ON market_stream_events(asset_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS market_stream_events_type_idx
     ON market_stream_events(event_type);
+
+CREATE TABLE IF NOT EXISTS market_followability_snapshots (
+    snapshot_uid text PRIMARY KEY REFERENCES orderbook_snapshots(snapshot_uid) ON DELETE CASCADE,
+    snapshot_at timestamptz NOT NULL,
+    asset_id text NOT NULL,
+    condition_id text,
+    spread numeric,
+    spread_bps numeric,
+    top_bid_depth numeric NOT NULL DEFAULT 0,
+    top_ask_depth numeric NOT NULL DEFAULT 0,
+    estimated_buy_slippage numeric,
+    estimated_sell_slippage numeric,
+    buy_fillable boolean NOT NULL DEFAULT false,
+    sell_fillable boolean NOT NULL DEFAULT false,
+    spread_too_wide boolean NOT NULL DEFAULT false,
+    depth_insufficient boolean NOT NULL DEFAULT false,
+    price_missing boolean NOT NULL DEFAULT false,
+    market_liquidity_score numeric,
+    signal_to_snapshot_delay_seconds bigint,
+    notes jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS market_followability_asset_time_idx
+    ON market_followability_snapshots(asset_id, snapshot_at DESC);
+CREATE INDEX IF NOT EXISTS market_followability_flags_idx
+    ON market_followability_snapshots(spread_too_wide, depth_insufficient, price_missing);
+
+CREATE TABLE IF NOT EXISTS trade_clv_metrics (
+    trade_uid text PRIMARY KEY REFERENCES trades(trade_uid) ON DELETE CASCADE,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    condition_id text,
+    token_id text,
+    side text,
+    trade_timestamp timestamptz NOT NULL,
+    trade_price numeric,
+    reference_price numeric,
+    reference_source text,
+    reference_at timestamptz,
+    signal_to_reference_delay_seconds bigint,
+    clv_30s numeric,
+    clv_2m numeric,
+    clv_10m numeric,
+    clv_1h numeric,
+    clv_24h numeric,
+    future_price_30s numeric,
+    future_price_2m numeric,
+    future_price_10m numeric,
+    future_price_1h numeric,
+    future_price_24h numeric,
+    missing_reason text,
+    calculated_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS trade_clv_wallet_time_idx
+    ON trade_clv_metrics(wallet_address, trade_timestamp DESC);
+CREATE INDEX IF NOT EXISTS trade_clv_token_time_idx
+    ON trade_clv_metrics(token_id, trade_timestamp DESC);
 """
 
 

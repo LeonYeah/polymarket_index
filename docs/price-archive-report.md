@@ -16,12 +16,16 @@ endpoints and does not require private keys, cookies, signatures, or trading cre
   - `orderbook_top`
   - `orderbook_depth_snapshots`
   - `market_stream_events`
+  - `market_followability_snapshots`
+  - `trade_clv_metrics`
 - Added `backend.app.collectors.price_data` for:
   - price history normalization
   - order book top-of-book and finite depth normalization
   - market WebSocket event normalization with `received_at`
   - direction-adjusted CLV helpers
+  - bulk CLV materialization for stored trades
   - conservative book-depth slippage estimation
+  - followability flags and liquidity scoring
 - Added `backend.app.db.price_repository`.
 - Added CLI:
 
@@ -46,6 +50,23 @@ python -m backend.scripts.archive_price_data \
   --websocket \
   --websocket-seconds 2 \
   --websocket-event-limit 2
+
+# CLV materialization
+python -m backend.scripts.archive_price_data \
+  --skip-history \
+  --skip-orderbook \
+  --calculate-clv \
+  --clv-limit 1000
+
+# 24-hour watchlist shape: order book every 30s, WebSocket for 24h
+python -m backend.scripts.archive_price_data \
+  --tokens <comma_separated_watchlist_tokens> \
+  --skip-history \
+  --orderbook-cycles 2880 \
+  --orderbook-interval-seconds 30 \
+  --websocket \
+  --websocket-seconds 86400 \
+  --websocket-event-limit 1000000
 ```
 
 ## Data Policy
@@ -57,6 +78,8 @@ python -m backend.scripts.archive_price_data \
   arrive delayed or out of order.
 - Historical prices are not treated as historical order book depth and must not be used to claim
   precise slippage simulation.
+- CLV materialization prefers archived midpoint at or after the requested horizon and falls back to
+  `price_points` when no midpoint is available.
 
 ## Validation
 
@@ -67,6 +90,7 @@ Unit tests cover:
 - WebSocket event timestamp preservation.
 - CLV sign adjustment by trade direction.
 - conservative depth-based slippage estimation.
+- followability flags for wide spread, insufficient depth, and missing top-of-book prices.
 
 Expected verification commands:
 
@@ -79,7 +103,7 @@ Local Week05 smoke:
 
 ```text
 python -m backend.scripts.db_migrate
-Applied schema migration: 2026_07_09_week05_price_archive_schema_v1
+Applied schema migration: 2026_07_09_week05_price_archive_schema_v2
 
 python -m backend.scripts.archive_price_data --tokens <sample_token> --token-limit 1 --depth-limit 3
 price_points: 1441 attempted / 1440 stored after idempotent upsert
@@ -90,13 +114,28 @@ failed_tokens: 0
 python -m backend.scripts.archive_price_data --tokens <sample_token> --skip-history --skip-orderbook --websocket --websocket-seconds 2 --websocket-event-limit 2
 market_stream_events: 1
 websocket_reconnects: 0
+
+python -m backend.scripts.archive_price_data --token-limit 100 --skip-orderbook
+tokens: 100
+raw_responses: 100
+price_points: 144101 attempted
+failed_tokens: 0
+
+python -m backend.scripts.archive_price_data --token-limit 5 --skip-history --orderbook-cycles 3 --orderbook-interval-seconds 2 --depth-limit 5 --websocket --websocket-seconds 10 --websocket-event-limit 10
+orderbook_snapshots: 15
+orderbook_depth_rows: 150
+followability_snapshots: 15
+market_stream_events: 10
+websocket_reconnects: 0
+
+python -m backend.scripts.archive_price_data --token-limit 5 --skip-history --skip-orderbook --calculate-clv --clv-limit 200
+trade_clv_metrics: 200
+rows_with_any_clv: 19
 ```
 
 ## Known Limits
 
-- The CLI supports short bounded WebSocket archiving, but a 24-hour supervised run has not been
-  completed in this code pass.
-- CLV helpers are implemented as pure functions; bulk CLV materialization for stored Week03/Week04
-  trades still needs a dedicated job.
+- The CLI supports the 24-hour watchlist run shape, but this code pass validated it with a bounded
+  10-second WebSocket run and 3 order book cycles instead of waiting for a full day.
 - PnL still stores placeholder `estimated_slippage=0`; Week05 data is now available for a later
   PnL enrichment pass.
