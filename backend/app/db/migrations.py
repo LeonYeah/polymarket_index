@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week03_schema_v1"
+SCHEMA_VERSION = "2026_07_09_week04_pnl_schema_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -304,6 +304,123 @@ CREATE TABLE IF NOT EXISTS wallet_backfill_checkpoints (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (wallet_address, endpoint, taker_only)
 );
+
+CREATE TABLE IF NOT EXISTS market_resolution_status (
+    condition_id text PRIMARY KEY,
+    status text NOT NULL,
+    closed boolean,
+    active boolean,
+    archived boolean,
+    resolved_at timestamptz,
+    winning_outcome text,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS market_resolution_status_status_idx
+    ON market_resolution_status(status);
+
+CREATE TABLE IF NOT EXISTS wallet_market_results (
+    result_uid text PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    condition_id text,
+    token_id text,
+    outcome text,
+    market_status text NOT NULL DEFAULT 'unknown',
+    result_status text NOT NULL DEFAULT 'unknown',
+    outcome_correct boolean,
+    trade_count integer NOT NULL DEFAULT 0,
+    buy_count integer NOT NULL DEFAULT 0,
+    sell_count integer NOT NULL DEFAULT 0,
+    taker_trade_count integer NOT NULL DEFAULT 0,
+    total_buy_size numeric NOT NULL DEFAULT 0,
+    total_sell_size numeric NOT NULL DEFAULT 0,
+    total_buy_notional numeric NOT NULL DEFAULT 0,
+    total_sell_notional numeric NOT NULL DEFAULT 0,
+    avg_buy_price numeric,
+    avg_sell_price numeric,
+    open_size numeric NOT NULL DEFAULT 0,
+    capital_deployed numeric NOT NULL DEFAULT 0,
+    realized_pnl numeric NOT NULL DEFAULT 0,
+    unrealized_pnl numeric NOT NULL DEFAULT 0,
+    current_value numeric NOT NULL DEFAULT 0,
+    estimated_fees numeric NOT NULL DEFAULT 0,
+    estimated_slippage numeric NOT NULL DEFAULT 0,
+    fees_estimated boolean NOT NULL DEFAULT true,
+    slippage_estimated boolean NOT NULL DEFAULT true,
+    fee_risk_level text NOT NULL DEFAULT 'unknown',
+    net_pnl numeric NOT NULL DEFAULT 0,
+    gross_roi numeric,
+    net_roi numeric,
+    entry_time timestamptz,
+    exit_time timestamptz,
+    holding_duration_seconds bigint,
+    calculation_notes jsonb NOT NULL DEFAULT '{}'::jsonb,
+    calculated_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS wallet_market_results_wallet_market_token_idx
+    ON wallet_market_results(wallet_address, COALESCE(condition_id, ''), COALESCE(token_id, ''), COALESCE(outcome, ''));
+CREATE INDEX IF NOT EXISTS wallet_market_results_wallet_idx
+    ON wallet_market_results(wallet_address);
+CREATE INDEX IF NOT EXISTS wallet_market_results_condition_idx
+    ON wallet_market_results(condition_id);
+CREATE INDEX IF NOT EXISTS wallet_market_results_result_status_idx
+    ON wallet_market_results(result_status);
+
+CREATE TABLE IF NOT EXISTS wallet_daily_equity (
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    equity_date date NOT NULL,
+    realized_pnl_cumulative numeric NOT NULL DEFAULT 0,
+    unrealized_pnl numeric NOT NULL DEFAULT 0,
+    net_pnl numeric NOT NULL DEFAULT 0,
+    capital_deployed numeric NOT NULL DEFAULT 0,
+    daily_volume numeric NOT NULL DEFAULT 0,
+    trades_count integer NOT NULL DEFAULT 0,
+    drawdown numeric NOT NULL DEFAULT 0,
+    max_drawdown numeric NOT NULL DEFAULT 0,
+    calculated_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (wallet_address, equity_date)
+);
+
+CREATE INDEX IF NOT EXISTS wallet_daily_equity_wallet_date_idx
+    ON wallet_daily_equity(wallet_address, equity_date DESC);
+
+CREATE TABLE IF NOT EXISTS pnl_reconciliation_checks (
+    id bigserial PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    condition_id text,
+    token_id text,
+    check_type text NOT NULL,
+    status text NOT NULL,
+    diff_category text NOT NULL,
+    engine_realized_pnl numeric,
+    source_realized_pnl numeric,
+    difference numeric,
+    tolerance numeric NOT NULL DEFAULT 0,
+    details jsonb NOT NULL DEFAULT '{}'::jsonb,
+    checked_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS pnl_reconciliation_wallet_idx
+    ON pnl_reconciliation_checks(wallet_address, checked_at DESC);
+CREATE INDEX IF NOT EXISTS pnl_reconciliation_status_idx
+    ON pnl_reconciliation_checks(status, diff_category);
 """
 
 

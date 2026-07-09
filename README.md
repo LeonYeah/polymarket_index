@@ -25,6 +25,13 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
+Wallet PnL profile after Week04 calculation:
+
+```bash
+python -m backend.scripts.calculate_pnl --wallet-limit 100
+curl 'http://127.0.0.1:8000/wallets/<wallet_address>/profile?market_limit=50'
+```
+
 Run the read-only API probe:
 
 ```bash

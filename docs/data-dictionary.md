@@ -69,6 +69,48 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `next_offset` | integer | Internal | Offset to resume paged backfills. |
 | `status` | enum | Internal | running, exhausted, succeeded, or failed. |
 
+## Wallet Market Result
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `result_uid` | string | Derived | Stable hash over wallet, condition, token, and outcome. |
+| `wallet_address` | string | Derived | Lowercase normalized wallet. |
+| `condition_id` | string | Data/Gamma | Market condition id; missing ids are marked `mapping_failed`. |
+| `token_id` | string | Data/CLOB | Outcome token id. |
+| `market_status` | enum | Derived | open, closed, archived, or unknown from `market_resolution_status`. |
+| `result_status` | enum | Derived | open, closed, settled, archived, disputed, cancelled, mapping_failed, unknown. |
+| `realized_pnl` | decimal | Closed positions | Sum of `wallet_positions_closed.realized_pnl`; current marked value is excluded. |
+| `unrealized_pnl` | decimal | Current positions | Sum of `wallet_positions_current.cash_pnl`; does not feed realized score. |
+| `current_value` | decimal | Current positions | Marked value retained for exposure analysis only. |
+| `capital_deployed` | decimal | Derived | V1 uses max(total buy notional minus total sell notional, 0). |
+| `net_roi` | decimal | Derived | `(realized + unrealized - estimated fees - estimated slippage) / capital_deployed`. |
+| `estimated_fees` | decimal | Placeholder | V1 stores zero with `fees_estimated=true`; Week05 can refine from order book/fee model. |
+| `estimated_slippage` | decimal | Placeholder | V1 stores zero with `slippage_estimated=true`; Week05 can refine from order book. |
+| `outcome_correct` | boolean | Derived | Only set when a closed market has enough source price evidence. |
+
+## Wallet Daily Equity
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `wallet_address` | string | Derived | Wallet being summarized. |
+| `equity_date` | date | Derived | UTC trade/close date. |
+| `realized_pnl_cumulative` | decimal | Derived | Cumulative closed-position realized PnL through the date. |
+| `unrealized_pnl` | decimal | Derived | Current unrealized PnL on calculation date only in v1. |
+| `net_pnl` | decimal | Derived | Realized cumulative plus v1 unrealized point-in-time value. |
+| `drawdown` | decimal | Derived | Peak-to-current decline in the v1 daily curve. |
+| `max_drawdown` | decimal | Derived | Maximum observed drawdown through the date. |
+
+## PnL Reconciliation Check
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `check_type` | enum | Internal | V1 starts with `closed_position_realized_pnl`. |
+| `status` | enum | Derived | matched or different. |
+| `diff_category` | enum | Derived | matched, field_missing, time_window_different, fee_basis_different, mapping_failed, unknown. |
+| `engine_realized_pnl` | decimal | Derived | PnL engine output for the wallet-market-token. |
+| `source_realized_pnl` | decimal | Data API | Closed position realized PnL used for comparison. |
+| `difference` | decimal | Derived | Engine minus source value. |
+
 ## Price
 
 | Field | Type | Source | Notes |

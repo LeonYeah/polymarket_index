@@ -2,7 +2,7 @@
 
 更新时间：2026-07-09
 
-下次会话先读本文件，再按目标查看 `../polymarket-wallet-tracker-plan/`。当前建议直接进入 `Week04-PnL引擎与对账.md`。
+下次会话先读本文件，再按目标查看 `../polymarket-wallet-tracker-plan/`。当前建议直接进入 `Week05-价格与订单簿归档.md`。
 
 ## 项目目标与边界
 
@@ -21,7 +21,7 @@
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
 - VPS 登录：`ssh usa`
 - Python venv：`codes/.venv`
-- 最新已提交代码：`fe99c53 完成Week03钱包回填验收`
+- 最新阶段：Week04 PnL 引擎与对账已完成，代码待以当前工作提交为准。
 
 ## 当前架构
 
@@ -29,7 +29,8 @@
 codes/
   backend/
     app/
-      api/                  FastAPI: health, wallet timeline
+      analytics/            PnL 引擎与画像聚合
+      api/                  FastAPI: health, wallet timeline/profile
       collectors/           Polymarket 只读采集与回填
       core/                 配置、日志、run_id
       db/                   PostgreSQL 连接、schema、repository
@@ -39,12 +40,14 @@ codes/
       db_migrate.py         schema 迁移
       ingest_market_data.py 市场/容量/holders 采集
       backfill_wallet_data.py 钱包发现与交易/仓位回填
-    tests/                  health、schema、解析、钱包回填测试
+      calculate_pnl.py      PnL 计算与对账入口
+    tests/                  health、schema、解析、钱包回填、PnL 测试
   docs/
     api-probe-report.md
     data-dictionary.md
     market-data-ingestion-report.md
     wallet-backfill-report.md
+    pnl-engine-report.md
     adr/
     samples/
   frontend/                 Next.js 占位，尚未开发
@@ -123,6 +126,28 @@ timeline API: 200, 返回交易时间线
 重复 upsert 同一批 trade: 第二次未新增记录
 ```
 
+PnL 引擎与对账：
+
+- `python -m backend.scripts.calculate_pnl --wallet-limit 100`
+- 已建表：`market_resolution_status`、`wallet_market_results`、`wallet_daily_equity`、`pnl_reconciliation_checks`。
+- PnL v1 以 wallet-market-token-outcome 聚合交易、当前仓位和已平仓仓位。
+- `realized_pnl` 仅来自 `wallet_positions_closed.realized_pnl`；`wallet_positions_current.cash_pnl` 仅进入 `unrealized_pnl`；`current_value` 仅作为敞口/估值字段。
+- fee/slippage 字段已预留，v1 为显式 estimated zero，Week05 可用订单簿补充。
+- `GET /wallets/{wallet_address}/profile?market_limit=50` 可查询钱包画像、市场级 PnL、profit factor、最大回撤、单市场利润占比等基础指标。
+
+Week04 验收：
+
+```text
+wallets_processed: 100
+failed_wallets: 0
+market_statuses_refreshed: 500
+wallet_market_results: 16181
+wallet_daily_equity_rows: 4637
+reconciliation_checks: 2703
+pytest -q: 27 passed, 1 warning
+ruff check .: passed
+```
+
 ## 关键数据口径
 
 - `/trades` 必须显式设置 `takerOnly`，否则可能漏掉 maker 风格活动。
@@ -132,13 +157,16 @@ timeline API: 200, 返回交易时间线
 - token 映射按 `clobTokenIds` 与 `outcomes` 顺序建立；长度不一致标记 `mapping_status=failed`。
 - 抽样 token 使用 CLOB `markets-by-token/{token_id}` 校验。
 - 高活跃钱包仍可能有更深 `/trades` 历史；`status=running` 的 checkpoint 可继续从 offset 续跑。
+- realized PnL 不使用当前仓位的 `cash_pnl/current_value`；这些字段只进入 unrealized/exposure。
+- `/trades?takerOnly=false` 是采集口径，不是单笔交易 maker/taker 角色证据。
 
 ## 当前未完成与遗留债务
 
 下一阶段核心：
 
-- Week04：PnL 引擎与对账尚未实现。
-- 尚未计算 realized PnL、unrealized PnL、费用、结算状态、仓位/交易对账。
+- Week05：价格与订单簿归档尚未实现。
+- 尚未建立价格历史、订单簿快照表和定时采集任务。
+- 尚未用订单簿补充 slippage/可成交价格估算。
 - 尚未实现 SmartScore、统计回测、跟单筛选。
 
 数据与模型债务：
@@ -151,11 +179,11 @@ timeline API: 200, 返回交易时间线
 价格与订单簿：
 
 - 已验证 CLOB book/prices-history/WebSocket 可用。
-- 尚未建立价格历史、订单簿快照表和定时采集任务。
+- 尚未建立价格历史、订单簿快照表和定时采集任务；这是 Week05 主线。
 
 API/前端/生产化：
 
-- API 目前只有 health 与 wallet timeline；尚未做完整 Dashboard 查询 API。
+- API 目前有 health、wallet timeline、wallet profile；尚未做完整 Dashboard 查询 API。
 - frontend 仍是 Next.js 占位，尚未开发 dashboard。
 - 尚未做调度器、任务队列、长期限流策略、监控告警、部署脚本。
 - VPS 目前没有需要提交的代码；后续部署采集节点仍必须保持只读边界。
@@ -190,12 +218,19 @@ python -m backend.scripts.ingest_market_data --max-markets 5 --page-limit 5 --ho
 python -m backend.scripts.backfill_wallet_data --candidate-limit 5 --leaderboard-limit 3 --holder-candidate-limit 3 --active-trader-limit 3 --backfill-wallet-limit 1 --page-limit 2 --max-trade-pages 1
 ```
 
+PnL 计算 smoke：
+
+```bash
+python -m backend.scripts.calculate_pnl --wallet-limit 5 --profile-limit 2
+```
+
 启动 API：
 
 ```bash
 uvicorn backend.app.main:app --reload
 curl http://127.0.0.1:8000/health
 curl 'http://127.0.0.1:8000/wallets/<wallet_address>/timeline?limit=100'
+curl 'http://127.0.0.1:8000/wallets/<wallet_address>/profile?market_limit=50'
 ```
 
 关闭本地容器：
@@ -206,20 +241,20 @@ docker compose -f infra/docker-compose.yml down
 
 ## 建议下一步
 
-进入 Week04：PnL 引擎与对账。
+进入 Week05：价格与订单簿归档。
 
 建议顺序：
 
-1. 阅读 `../polymarket-wallet-tracker-plan/Week04-PnL引擎与对账.md`。
-2. 基于 `trades`、`wallet_positions_current`、`wallet_positions_closed` 设计 PnL schema 与 repository。
-3. 先实现 realized PnL 与 closed positions 对账；不得把 `cashPnl/currentValue` 混入 realized PnL。
-4. 再实现 unrealized PnL、当前仓位估值和异常差异报告。
-5. 只读边界不变，不做真实下单。
+1. 阅读 `../polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md`。
+2. 基于 CLOB book/prices-history/WebSocket 设计价格历史和订单簿快照 schema。
+3. 将可成交价格、spread、depth 和 slippage 估算回填到 PnL/容量分析输入。
+4. 建立小规模定时采集或 CLI 归档入口，保持只读边界。
+5. 不要用最后成交价替代可成交价格。
 
 下次会话可直接提示：
 
 ```text
-请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week04-PnL引擎与对账.md。
-当前 Week01/Week02/Week03 核心能力已完成：只读 API 探针、市场/容量/holders 采集、1358 个候选钱包、320 个完整回填钱包、234957 条唯一 trades、钱包 timeline API。
-请继续推进 Week04：PnL 引擎与对账。保持只读边界，不要加入私钥、签名、真实下单或交易凭证。
+请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md。
+当前 Week01-Week04 核心能力已完成：只读 API 探针、市场/容量/holders 采集、1358 个候选钱包、320 个完整回填钱包、234957 条唯一 trades、钱包 timeline API、PnL 引擎、100 钱包 PnL 验收和闭仓 PnL 对账。
+请继续推进 Week05：价格与订单簿归档。保持只读边界，不要加入私钥、签名、真实下单或交易凭证。
 ```

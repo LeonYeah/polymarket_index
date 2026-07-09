@@ -35,3 +35,19 @@ def test_schema_contains_week03_wallet_tables() -> None:
 def test_schema_records_trade_uniqueness_and_checkpoint_resume() -> None:
     assert "trade_uid text PRIMARY KEY" in SCHEMA_SQL
     assert "PRIMARY KEY (wallet_address, endpoint, taker_only)" in SCHEMA_SQL
+
+
+def test_schema_contains_week04_pnl_tables() -> None:
+    for table_name in [
+        "wallet_market_results",
+        "wallet_daily_equity",
+        "pnl_reconciliation_checks",
+        "market_resolution_status",
+    ]:
+        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in SCHEMA_SQL
+
+
+def test_schema_keeps_realized_and_unrealized_pnl_separate() -> None:
+    assert "realized_pnl numeric NOT NULL DEFAULT 0" in SCHEMA_SQL
+    assert "unrealized_pnl numeric NOT NULL DEFAULT 0" in SCHEMA_SQL
+    assert "current_value numeric NOT NULL DEFAULT 0" in SCHEMA_SQL
