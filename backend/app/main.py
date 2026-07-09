@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from backend.app.api.health import router as health_router
+from backend.app.api.scores import router as scores_router
 from backend.app.api.wallets import router as wallets_router
 from backend.app.core.config import get_settings
 from backend.app.core.logging import configure_logging
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(wallets_router)
+    app.include_router(scores_router)
     return app
 
 

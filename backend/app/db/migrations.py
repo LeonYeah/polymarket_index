@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week05_price_archive_schema_v2"
+SCHEMA_VERSION = "2026_07_09_week06_smart_score_schema_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -600,6 +600,134 @@ CREATE INDEX IF NOT EXISTS trade_clv_wallet_time_idx
     ON trade_clv_metrics(wallet_address, trade_timestamp DESC);
 CREATE INDEX IF NOT EXISTS trade_clv_token_time_idx
     ON trade_clv_metrics(token_id, trade_timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS wallet_features (
+    feature_uid text PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    feature_version text NOT NULL,
+    as_of timestamptz NOT NULL,
+    observation_start timestamptz NOT NULL,
+    observation_end timestamptz NOT NULL,
+    n_resolved integer NOT NULL DEFAULT 0,
+    active_days_180d integer NOT NULL DEFAULT 0,
+    realized_notional_180d numeric NOT NULL DEFAULT 0,
+    realized_pnl_180d numeric NOT NULL DEFAULT 0,
+    open_unrealized_pnl numeric NOT NULL DEFAULT 0,
+    capital_deployed_180d numeric NOT NULL DEFAULT 0,
+    net_roi_180d numeric,
+    gross_profit_180d numeric NOT NULL DEFAULT 0,
+    gross_loss_180d numeric NOT NULL DEFAULT 0,
+    profit_factor numeric,
+    win_rate numeric,
+    bayes_wr numeric,
+    max_drawdown numeric NOT NULL DEFAULT 0,
+    max_drawdown_ratio numeric,
+    single_market_pnl_share numeric,
+    avg_clv_30s numeric,
+    avg_clv_2m numeric,
+    avg_clv_10m numeric,
+    avg_clv_1h numeric,
+    avg_clv_24h numeric,
+    positive_clv_share numeric,
+    clv_sample_count integer NOT NULL DEFAULT 0,
+    avg_followability numeric,
+    low_liquidity_trade_share numeric,
+    input_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+    calculated_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (wallet_address, feature_version, as_of)
+);
+
+CREATE INDEX IF NOT EXISTS wallet_features_wallet_asof_idx
+    ON wallet_features(wallet_address, as_of DESC);
+CREATE INDEX IF NOT EXISTS wallet_features_quality_idx
+    ON wallet_features(n_resolved DESC, bayes_wr DESC, net_roi_180d DESC);
+
+CREATE TABLE IF NOT EXISTS wallet_scores (
+    score_uid text PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    feature_uid text NOT NULL REFERENCES wallet_features(feature_uid) ON DELETE CASCADE,
+    score_version text NOT NULL,
+    score numeric NOT NULL,
+    raw_score numeric NOT NULL,
+    confidence numeric NOT NULL,
+    high_confidence_eligible boolean NOT NULL DEFAULT false,
+    hard_gate_status jsonb NOT NULL DEFAULT '{}'::jsonb,
+    exclusion_reasons jsonb NOT NULL DEFAULT '[]'::jsonb,
+    penalty_summary jsonb NOT NULL DEFAULT '[]'::jsonb,
+    component_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+    weight_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+    scored_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (wallet_address, score_version, scored_at)
+);
+
+CREATE INDEX IF NOT EXISTS wallet_scores_rank_idx
+    ON wallet_scores(score_version, score DESC, confidence DESC);
+CREATE INDEX IF NOT EXISTS wallet_scores_eligible_idx
+    ON wallet_scores(high_confidence_eligible, score DESC);
+
+CREATE TABLE IF NOT EXISTS wallet_score_components (
+    score_uid text NOT NULL REFERENCES wallet_scores(score_uid) ON DELETE CASCADE,
+    component_name text NOT NULL,
+    component_score numeric NOT NULL,
+    max_score numeric NOT NULL,
+    details jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (score_uid, component_name)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    backtest_run_uid text PRIMARY KEY,
+    score_version text NOT NULL,
+    training_start timestamptz NOT NULL,
+    training_end timestamptz NOT NULL,
+    validation_start timestamptz NOT NULL,
+    validation_end timestamptz NOT NULL,
+    strategy_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+    status text NOT NULL,
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS backtest_wallet_results (
+    result_uid text PRIMARY KEY,
+    backtest_run_uid text NOT NULL REFERENCES backtest_runs(backtest_run_uid) ON DELETE CASCADE,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    strategy text NOT NULL,
+    strategy_rank integer NOT NULL,
+    training_score numeric,
+    training_confidence numeric,
+    training_features jsonb NOT NULL DEFAULT '{}'::jsonb,
+    future_realized_pnl numeric NOT NULL DEFAULT 0,
+    future_net_pnl numeric NOT NULL DEFAULT 0,
+    future_capital_deployed numeric NOT NULL DEFAULT 0,
+    future_roi numeric,
+    future_avg_clv_10m numeric,
+    future_max_drawdown numeric,
+    selected_at timestamptz NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS backtest_wallet_results_run_strategy_idx
+    ON backtest_wallet_results(backtest_run_uid, strategy, strategy_rank);
 """
 
 

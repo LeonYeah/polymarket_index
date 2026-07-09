@@ -42,6 +42,14 @@ python -m backend.scripts.archive_price_data --tokens <clob_token_id> --skip-his
 python -m backend.scripts.archive_price_data --skip-history --skip-orderbook --calculate-clv --clv-limit 1000
 ```
 
+SmartScore ranking and statistical backtest after Week06 schema migration:
+
+```bash
+python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20
+python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20 --backtest --strategy-size 10 --validation-days 30
+curl 'http://127.0.0.1:8000/scores/leaderboard?limit=50'
+```
+
 For a 24-hour watchlist archive, run with explicit watchlist tokens:
 
 ```bash

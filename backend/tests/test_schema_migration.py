@@ -69,3 +69,21 @@ def test_schema_contains_week05_price_archive_tables() -> None:
 def test_schema_records_received_at_for_market_stream_events() -> None:
     assert "received_at timestamptz NOT NULL" in SCHEMA_SQL
     assert "event_at timestamptz" in SCHEMA_SQL
+
+
+def test_schema_contains_week06_smart_score_tables() -> None:
+    for table_name in [
+        "wallet_features",
+        "wallet_scores",
+        "wallet_score_components",
+        "backtest_runs",
+        "backtest_wallet_results",
+    ]:
+        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in SCHEMA_SQL
+
+
+def test_schema_records_score_reproducibility_fields() -> None:
+    assert "score_version text NOT NULL" in SCHEMA_SQL
+    assert "weight_config jsonb NOT NULL DEFAULT '{}'::jsonb" in SCHEMA_SQL
+    assert "input_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb" in SCHEMA_SQL
+    assert "hard_gate_status jsonb NOT NULL DEFAULT '{}'::jsonb" in SCHEMA_SQL

@@ -182,3 +182,51 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `clv_30s/2m/10m/1h/24h` | decimal | Derived | `future_price - reference_price` for buys; sign reversed for sells. |
 | `trade_clv_metrics.reference_source` | string | Derived | `orderbook_midpoint` preferred; `price_history` fallback. |
 | `trade_clv_metrics.missing_reason` | string | Derived | `missing_reference_price` or `missing_future_prices` when CLV cannot be computed. |
+
+## SmartScore Feature
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `feature_uid` | string | Derived | Stable hash over wallet, feature version, and scoring cutoff. |
+| `feature_version` | string | Internal | Versioned feature contract, currently `wallet_features_v1`. |
+| `as_of` | timestamp | Internal | Scoring cutoff; feature queries must not read later observations. |
+| `observation_start/end` | timestamp | Internal | Training observation window, v1 defaults to 180 days. |
+| `n_resolved` | integer | `wallet_market_results` | Closed or settled market-result count in the observation window. |
+| `active_days_180d` | integer | `trades` | Distinct UTC trade days in the observation window. |
+| `realized_notional_180d` | decimal | `trades` | Sum of trade notional in the observation window; used for hard gate. |
+| `realized_pnl_180d` | decimal | `wallet_market_results` | Sum of realized PnL from closed or settled result rows. |
+| `net_roi_180d` | decimal | Derived | `(realized_pnl + open_unrealized_pnl) / capital_deployed_180d`; open PnL remains separately visible. |
+| `bayes_wr` | decimal | Derived | Bayesian win rate with 55% neutral prior from wins/losses. |
+| `max_drawdown_ratio` | decimal | Derived | Latest daily max drawdown divided by observation-window capital deployed. |
+| `single_market_pnl_share` | decimal | Derived | Best single-market realized PnL divided by gross profit. |
+| `avg_clv_*` | decimal | `trade_clv_metrics` | Average signed CLV by horizon where data exists. |
+| `avg_followability` | decimal | `market_followability_snapshots` | Latest pre-trade liquidity score by token, averaged per wallet. |
+| `input_snapshot` | json | Internal | Source table list and parameters needed for reproducibility. |
+
+## Wallet Score
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `score_uid` | string | Derived | Stable hash over wallet, score version, and scoring time. |
+| `score_version` | string | Internal | Versioned scoring contract, currently `smart_score_v1`. |
+| `score` | decimal | Derived | Final 0-100 score after caps and penalties. |
+| `raw_score` | decimal | Derived | Component sum before caps and penalties. |
+| `confidence` | decimal | Derived | 0-1 confidence from sample size, activity, followability, CLV coverage, and unrealized-PnL concentration. |
+| `high_confidence_eligible` | boolean | Derived | True only when all hard gates pass. |
+| `hard_gate_status` | json | Derived | Per-gate boolean status for resolved count, activity, notional, ROI, Bayesian WR, drawdown, concentration, and followability. |
+| `exclusion_reasons` | json | Derived | Failed gate names. |
+| `penalty_summary` | json | Derived | Score caps and deductions, including small sample and single-market concentration. |
+| `weight_config` | json | Internal | Component weights used for reproducible scoring. |
+
+## Backtest
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `backtest_runs.training_start/end` | timestamp | Internal | Observation window used to select wallets. |
+| `backtest_runs.validation_start/end` | timestamp | Internal | Future window used to compare selected wallets. |
+| `strategy` | enum | Derived | V1 strategies: `top_score`, `top_pnl`, `random_active`. |
+| `training_score` | decimal | `wallet_scores` | Score at training cutoff. |
+| `training_features` | json | `wallet_features` | Feature snapshot used for selection audit. |
+| `future_net_pnl` | decimal | `wallet_market_results` | Future-window net PnL for the selected wallet. |
+| `future_roi` | decimal | Derived | Future net PnL divided by future capital deployed. |
+| `future_avg_clv_10m` | decimal | `trade_clv_metrics` | Future-window average 10-minute CLV where available. |
