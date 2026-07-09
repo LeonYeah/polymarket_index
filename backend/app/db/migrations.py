@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week02_schema_v1"
+SCHEMA_VERSION = "2026_07_09_week03_schema_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -157,6 +157,153 @@ CREATE TABLE IF NOT EXISTS raw_api_responses (
 
 CREATE INDEX IF NOT EXISTS raw_api_responses_run_idx ON raw_api_responses(ingestion_run_id);
 CREATE INDEX IF NOT EXISTS raw_api_responses_hash_idx ON raw_api_responses(response_hash);
+
+CREATE TABLE IF NOT EXISTS wallets (
+    wallet_address text PRIMARY KEY,
+    first_seen_at timestamptz,
+    last_seen_at timestamptz,
+    active_days_180d integer NOT NULL DEFAULT 0,
+    markets_count integer NOT NULL DEFAULT 0,
+    resolved_markets_count integer NOT NULL DEFAULT 0,
+    notional_30d numeric NOT NULL DEFAULT 0,
+    notional_90d numeric NOT NULL DEFAULT 0,
+    notional_180d numeric NOT NULL DEFAULT 0,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wallets_last_seen_idx ON wallets(last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS wallet_candidates (
+    id bigserial PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    seed_source text NOT NULL,
+    seed_ref text,
+    discovered_at timestamptz NOT NULL,
+    rank integer,
+    score numeric,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wallet_candidates_wallet_idx ON wallet_candidates(wallet_address);
+CREATE INDEX IF NOT EXISTS wallet_candidates_seed_source_idx ON wallet_candidates(seed_source);
+CREATE UNIQUE INDEX IF NOT EXISTS wallet_candidates_unique_seed_idx
+    ON wallet_candidates(wallet_address, seed_source, COALESCE(seed_ref, ''));
+
+CREATE TABLE IF NOT EXISTS trades (
+    trade_uid text PRIMARY KEY,
+    api_trade_id text,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    proxy_wallet text,
+    condition_id text,
+    token_id text,
+    side text,
+    price numeric,
+    size numeric,
+    notional numeric,
+    trade_timestamp timestamptz,
+    transaction_hash text,
+    taker_only boolean NOT NULL,
+    raw jsonb NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS trades_wallet_time_idx ON trades(wallet_address, trade_timestamp DESC);
+CREATE INDEX IF NOT EXISTS trades_condition_id_idx ON trades(condition_id);
+CREATE INDEX IF NOT EXISTS trades_token_id_idx ON trades(token_id);
+CREATE INDEX IF NOT EXISTS trades_transaction_hash_idx ON trades(transaction_hash);
+
+CREATE TABLE IF NOT EXISTS wallet_positions_current (
+    position_uid text PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    condition_id text,
+    token_id text,
+    outcome text,
+    size numeric,
+    avg_price numeric,
+    initial_value numeric,
+    current_value numeric,
+    cash_pnl numeric,
+    realized_pnl numeric,
+    cur_price numeric,
+    redeemable boolean,
+    mergeable boolean,
+    title text,
+    slug text,
+    event_slug text,
+    end_date timestamptz,
+    snapshot_at timestamptz NOT NULL,
+    raw jsonb NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wallet_positions_current_wallet_idx
+    ON wallet_positions_current(wallet_address, snapshot_at DESC);
+
+CREATE TABLE IF NOT EXISTS wallet_positions_closed (
+    position_uid text PRIMARY KEY,
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    condition_id text,
+    token_id text,
+    outcome text,
+    avg_price numeric,
+    total_bought numeric,
+    realized_pnl numeric,
+    cur_price numeric,
+    title text,
+    slug text,
+    event_slug text,
+    end_date timestamptz,
+    closed_at timestamptz,
+    raw jsonb NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wallet_positions_closed_wallet_idx
+    ON wallet_positions_closed(wallet_address, closed_at DESC);
+CREATE INDEX IF NOT EXISTS wallet_positions_closed_condition_idx
+    ON wallet_positions_closed(condition_id);
+
+CREATE TABLE IF NOT EXISTS wallet_activity_daily (
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    activity_date date NOT NULL,
+    trades_count integer NOT NULL DEFAULT 0,
+    markets_count integer NOT NULL DEFAULT 0,
+    notional numeric NOT NULL DEFAULT 0,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (wallet_address, activity_date)
+);
+
+CREATE TABLE IF NOT EXISTS wallet_backfill_checkpoints (
+    wallet_address text NOT NULL REFERENCES wallets(wallet_address),
+    endpoint text NOT NULL,
+    taker_only boolean NOT NULL DEFAULT false,
+    next_offset integer NOT NULL DEFAULT 0,
+    status text NOT NULL,
+    last_error text,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (wallet_address, endpoint, taker_only)
+);
 """
 
 

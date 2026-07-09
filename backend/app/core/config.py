@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     market_ingestion_target_categories: str = "Politics,Finance,Tech"
     market_ingestion_token_verification_limit: int = 100
 
+    wallet_candidate_limit: int = 500
+    wallet_leaderboard_limit: int = 150
+    wallet_holder_candidate_limit: int = 250
+    wallet_active_trader_limit: int = 500
+    wallet_backfill_wallet_limit: int = 100
+    wallet_backfill_page_limit: int = 100
+    wallet_backfill_max_trade_pages: int = 10
+
 
 @lru_cache
 def get_settings() -> Settings:

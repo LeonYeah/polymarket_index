@@ -6,7 +6,7 @@
 
 - 周计划：`../polymarket-wallet-tracker-plan/`
 - API/字段报告：`docs/`
-- 当前验收报告：`docs/market-data-ingestion-report.md`
+- 当前验收报告：`docs/market-data-ingestion-report.md`、`docs/wallet-backfill-report.md`
 
 ## 项目目标与边界
 
@@ -31,6 +31,8 @@
 当前提交：
 
 ```text
+当前最新提交：实现钱包发现与回填闭环（本文件所在提交）
+b001ba5 更新Week02验收交接说明
 7e9bd7c 完善市场分页采集与token校验
 eb2f49c 新增市场数据模型与采集管道
 6ad979c 初始化只读Polymarket钱包追踪项目
@@ -51,7 +53,8 @@ codes/
       api_probe.py          只读 API 探针
       db_migrate.py         PostgreSQL schema 迁移
       ingest_market_data.py 市场数据采集入口
-    tests/                  health、schema、数据解析测试
+      backfill_wallet_data.py 钱包发现与回填入口
+    tests/                  health、schema、数据解析测试、钱包回填解析测试
   docs/
     adr/                    技术决策
     samples/                脱敏样例摘要
@@ -116,6 +119,22 @@ codes/
 - 金额、价格、size 使用 `Decimal`。
 - 时间统一归一化 UTC，支持毫秒时间戳。
 
+钱包发现与回填：
+
+- `python -m backend.scripts.backfill_wallet_data`
+- Week03 schema 已建立：
+  - `wallets`
+  - `wallet_candidates`
+  - `trades`
+  - `wallet_positions_current`
+  - `wallet_positions_closed`
+  - `wallet_activity_daily`
+  - `wallet_backfill_checkpoints`
+- 候选来源覆盖 leaderboard DAY/WEEK/MONTH/ALL、Week02 holders、近期 `/trades?takerOnly=false`。
+- `/trades` 回填显式记录 `takerOnly=false`，用稳定字段生成 `trade_uid` 去重。
+- 当前仓位与已平仓仓位分表保存，`realizedPnl` 与 `cashPnl/currentValue` 分离。
+- checkpoint 使用 wallet、endpoint、takerOnly、offset 记录续跑状态。
+
 已完成真实验收：
 
 ```text
@@ -142,8 +161,19 @@ latest_error: None
 验证命令：
 
 ```text
-pytest -q: 13 passed, 1 warning
+pytest -q: 20 passed, 1 warning
 ruff check .: passed
+```
+
+Week03 smoke 验收：
+
+```text
+wallets: 9
+wallet_candidates: 18
+trades: 2
+wallet_positions_current: 2
+wallet_positions_closed: 2
+wallet_backfill_checkpoints: 3
 ```
 
 ## 已确认的数据口径
@@ -171,9 +201,10 @@ ruff check .: passed
 
 钱包与交易：
 
-- 尚未实现 Week03 钱包发现与历史行为回填。
-- 尚未建立 wallets、trades、positions、closed_positions 等正式入库表。
-- 尚未处理 maker/taker 双侧钱包归因。
+- Week03 已完成最小闭环和 smoke test，但尚未跑满计划验收规模。
+- 尚需分批运行到不少于 500 个 distinct 候选钱包，并至少回填 100 个钱包。
+- 尚未处理 maker/taker 双侧钱包归因；当前保留 `takerOnly=false` 口径避免默认漏数。
+- 尚未实现钱包交易时间线 API。
 
 PnL 与评分：
 
@@ -227,6 +258,19 @@ python -m backend.scripts.ingest_market_data --max-markets 500 --page-limit 100 
 docker compose -f infra/docker-compose.yml down
 ```
 
+钱包发现与回填 smoke test：
+
+```bash
+python -m backend.scripts.db_migrate
+python -m backend.scripts.backfill_wallet_data --candidate-limit 5 --leaderboard-limit 3 --holder-candidate-limit 3 --active-trader-limit 3 --backfill-wallet-limit 1 --page-limit 2 --max-trade-pages 1
+```
+
+钱包发现与回填默认目标：
+
+```bash
+python -m backend.scripts.backfill_wallet_data
+```
+
 小规模 smoke test：
 
 ```bash
@@ -249,14 +293,14 @@ ssh usa
 
 ## 建议下一步
 
-优先进入 Week03：钱包发现与历史行为回填。
+继续 Week03：分批放大钱包发现与历史行为回填。
 
 建议顺序：
 
 1. 读 `../polymarket-wallet-tracker-plan/Week03-钱包发现与历史行为回填.md`。
-2. 基于现有 market/token/holder 数据，设计 wallets、wallet_discovery_runs、trades、positions、closed_positions 表。
-3. 从 holders、leaderboard、trades 中发现候选钱包。
-4. 对候选钱包回填 positions、closed-positions、trades。
+2. 在已有 Week03 schema 和 `backfill_wallet_data` worker 基础上做分批回填。
+3. 先跑 candidate-only 或小批 10/25/50 钱包，观察限流和失败率。
+4. 达到不少于 500 个候选钱包和 100 个完成回填钱包后，补充正式验收记录。
 5. 保留 `takerOnly=false` 采集，避免漏掉 maker 风格钱包。
 6. 暂不做 PnL、评分、真实下单或复杂 dashboard。
 
@@ -264,7 +308,7 @@ ssh usa
 
 ```text
 请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week03-钱包发现与历史行为回填.md。
-当前 Week01/Week02 核心能力已完成：只读 API 探针、PostgreSQL schema、500 market 采集、token 校验、holders 和容量快照入库。
-请继续推进 Week03：钱包发现与历史行为回填。
+当前 Week01/Week02 核心能力已完成；Week03 已有 wallets/trades/positions schema、回填 worker 和 smoke test。
+请继续推进 Week03 的分批放大验收：500 个候选钱包、100 个钱包完成 trades/positions/closed_positions 回填。
 保持只读边界，不要把私钥、签名、真实订单执行放到 VPS 或仓库。
 ```
