@@ -127,17 +127,42 @@ VPS：
 ssh usa
 ```
 
-## 下一步：Week02
+## Week02 当前进展
 
-建议下一次直接推进 Week02：数据模型与市场数据采集。
+已完成第一条可运行纵切：
+
+1. PostgreSQL schema v1：
+   - `ingestion_runs`
+   - `events`
+   - `markets`
+   - `market_tokens`
+   - `market_liquidity_snapshots`
+   - `market_holders`
+   - `raw_api_responses`
+2. 等价迁移机制：
+   - `python -m backend.scripts.db_migrate`
+3. 市场数据采集 worker：
+   - `python -m backend.scripts.ingest_market_data`
+   - 支持 Gamma markets/events、token 映射、OI、live volume、holders、raw response 入库。
+4. 本地小批真实采集已验证：
+   - 连续运行 2 次后，`markets=5`、`market_tokens=10` 未重复膨胀。
+   - run-scoped snapshots、holders、raw responses 按批次保留。
+   - token 映射失败数为 0。
+5. 测试：
+   - `pytest -q`：10 passed。
+   - `ruff check .`：通过。
+
+验收报告见 `docs/market-data-ingestion-report.md`。
+
+## 下一步：继续 Week02
 
 优先事项：
 
-1. 设计 PostgreSQL schema：markets、events、tokens、API raw samples、ingestion runs。
-2. 建立 Alembic 或等价迁移机制。
-3. 做 Gamma markets/events/token 映射入库。
-4. 为 API response 增加 schema/字段稳定性测试。
-5. 保留 raw JSON/JSONL 归档规范，并记录 `run_id`、请求参数、采集时间。
+1. 针对 Gamma keyset cursor 做更大规模分页验证。
+2. 将采集规模提升到至少 500 个市场或当前目标市场全集。
+3. 增加 token 到 CLOB `markets-by-token/{token_id}` 或可用等价端点的抽样校验。
+4. 为 raw API response 增加更细的字段稳定性测试。
+5. 补全目标分类 Politics、Finance、Tech 的筛选策略。
 6. 暂不做 PnL、评分、真实下单或复杂 dashboard。
 
 下次会话建议提示：

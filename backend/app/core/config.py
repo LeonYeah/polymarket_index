@@ -32,8 +32,12 @@ class Settings(BaseSettings):
     api_probe_timeout_seconds: float = 20.0
     api_probe_output_dir: str = "docs/samples"
 
+    market_ingestion_page_limit: int = 100
+    market_ingestion_max_markets: int = 500
+    market_ingestion_holders_market_limit: int = 25
+    market_ingestion_holders_limit: int = 50
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
