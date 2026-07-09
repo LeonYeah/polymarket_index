@@ -4,12 +4,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from backend.app.collectors.wallet_data import (
+    WalletDataBackfill,
     normalize_active_trader_candidates,
     normalize_closed_position,
     normalize_current_position,
     normalize_leaderboard_candidates,
     normalize_trade,
 )
+from backend.app.core.config import Settings
 
 
 def test_normalize_leaderboard_candidates_records_period_source() -> None:
@@ -114,3 +116,12 @@ def test_closed_position_uses_realized_pnl_and_closed_timestamp() -> None:
     assert position["wallet_address"] == "0xabc"
     assert position["realized_pnl"] == Decimal("3.5")
     assert position["closed_at"] == datetime.fromtimestamp(1710000000, UTC)
+
+
+def test_wallet_backfill_retry_delay_uses_retry_after_header() -> None:
+    ingestion = WalletDataBackfill(Settings(), engine=None)  # type: ignore[arg-type]
+
+    class Response:
+        headers = {"retry-after": "2.5"}
+
+    assert ingestion._retry_delay_seconds(0, Response()) == 2.5  # type: ignore[arg-type]

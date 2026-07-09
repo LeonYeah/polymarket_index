@@ -357,6 +357,8 @@ class WalletDataBackfill:
             "backfill_wallet_limit": backfill_wallet_limit,
             "page_limit": page_limit,
             "max_trade_pages": max_trade_pages,
+            "retry_attempts": self.settings.wallet_backfill_retry_attempts,
+            "retry_base_seconds": self.settings.wallet_backfill_retry_base_seconds,
             "leaderboard_periods": list(LEADERBOARD_PERIODS),
             "trades_taker_only": False,
         }
@@ -372,6 +374,10 @@ class WalletDataBackfill:
             "closed_positions": 0,
             "raw_responses": 0,
             "checkpoints": 0,
+            "failed_wallets": 0,
+            "distinct_candidate_wallets": 0,
+            "fully_backfilled_wallets": 0,
+            "trade_exhausted_wallets": 0,
         }
         warnings: list[str] = []
 
@@ -432,23 +438,41 @@ class WalletDataBackfill:
                         min(candidate_limit, backfill_wallet_limit)
                     )
                     for wallet_address in backfill_wallets:
-                        wallet_counters = await self._backfill_wallet(
-                            client,
-                            repository,
-                            run_id,
-                            wallet_address,
-                            page_limit,
-                            max_trade_pages,
-                        )
-                        for key, value in wallet_counters.items():
-                            counters[key] += value
-                        counters["wallets_backfilled"] += 1
+                        try:
+                            wallet_counters = await self._backfill_wallet(
+                                client,
+                                repository,
+                                run_id,
+                                wallet_address,
+                                page_limit,
+                                max_trade_pages,
+                            )
+                            for key, value in wallet_counters.items():
+                                counters[key] += value
+                            counters["wallets_backfilled"] += 1
+                        except Exception as exc:  # noqa: BLE001 - record wallet-level failure and continue.
+                            repository.update_checkpoint(
+                                wallet_address=wallet_address,
+                                endpoint="/wallet-backfill",
+                                taker_only=False,
+                                next_offset=0,
+                                status="failed",
+                                run_id=run_id,
+                                last_error=f"{type(exc).__name__}: {exc}",
+                            )
+                            counters["failed_wallets"] += 1
+                            counters["checkpoints"] += 1
 
                     repository.refresh_wallet_activity(backfill_wallets, run_id)
 
                 finished_at = utc_now()
-                if counters["wallets"] < candidate_limit:
+                counters["distinct_candidate_wallets"] = repository.count_candidate_wallets()
+                counters["fully_backfilled_wallets"] = repository.count_backfilled_wallets()
+                counters["trade_exhausted_wallets"] = repository.count_trade_exhausted_wallets()
+                if counters["distinct_candidate_wallets"] < candidate_limit:
                     warnings.append("candidate_pool_below_target")
+                if counters["fully_backfilled_wallets"] < backfill_wallet_limit:
+                    warnings.append("fully_backfilled_wallets_below_target")
                 repository.finish_run(run_id, "succeeded", finished_at, counters)
                 return WalletBackfillResult(
                     run_id,
@@ -596,9 +620,26 @@ class WalletDataBackfill:
         count_key: str,
     ) -> Any:
         data_base = str(self.settings.polymarket_data_base_url).rstrip("/")
-        started = time.perf_counter()
-        response = await client.get(f"{data_base}{endpoint}", params=params)
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        attempts = max(1, self.settings.wallet_backfill_retry_attempts)
+        response: httpx.Response | None = None
+        duration_ms = 0
+        for attempt in range(attempts):
+            started = time.perf_counter()
+            try:
+                response = await client.get(f"{data_base}{endpoint}", params=params)
+            except httpx.RequestError:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(self._retry_delay_seconds(attempt, None))
+                    continue
+                raise
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(self._retry_delay_seconds(attempt, response))
+                    continue
+            break
+        if response is None:
+            raise RuntimeError("request_failed_without_response")
         response.raise_for_status()
         payload = response.json()
         repository.record_raw_response(
@@ -613,6 +654,16 @@ class WalletDataBackfill:
             body=payload,
         )
         return payload
+
+    def _retry_delay_seconds(self, attempt: int, response: httpx.Response | None) -> float:
+        if response is not None:
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    return min(float(retry_after), 30.0)
+                except ValueError:
+                    pass
+        return min(self.settings.wallet_backfill_retry_base_seconds * (2**attempt), 30.0)
 
 
 def _parse_int(value: Any) -> int | None:

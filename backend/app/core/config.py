@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     wallet_backfill_wallet_limit: int = 100
     wallet_backfill_page_limit: int = 100
     wallet_backfill_max_trade_pages: int = 10
+    wallet_backfill_retry_attempts: int = 3
+    wallet_backfill_retry_base_seconds: float = 1.0
 
 
 @lru_cache

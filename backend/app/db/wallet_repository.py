@@ -212,15 +212,74 @@ class WalletDataRepository:
         result = self.connection.execute(
             text(
                 """
-                SELECT wallet_address
-                FROM wallets
-                ORDER BY last_seen_at DESC NULLS LAST, updated_at DESC
+                WITH candidate_profile AS (
+                    SELECT
+                        wallet_address,
+                        bool_or(seed_source = 'holder') AS has_holder_seed,
+                        bool_or(seed_source IN ('leaderboard', 'active_trader')) AS has_activity_seed
+                    FROM wallet_candidates
+                    GROUP BY wallet_address
+                )
+                SELECT w.wallet_address
+                FROM wallets w
+                LEFT JOIN candidate_profile cp
+                    ON cp.wallet_address = w.wallet_address
+                LEFT JOIN wallet_backfill_checkpoints trades_checkpoint
+                    ON trades_checkpoint.wallet_address = w.wallet_address
+                    AND trades_checkpoint.endpoint = '/trades'
+                    AND trades_checkpoint.taker_only = false
+                ORDER BY
+                    CASE
+                        WHEN trades_checkpoint.wallet_address IS NULL THEN 0
+                        WHEN trades_checkpoint.status = 'running' THEN 1
+                        WHEN trades_checkpoint.status = 'exhausted' THEN 2
+                        ELSE 1
+                    END,
+                    CASE
+                        WHEN cp.has_holder_seed AND NOT cp.has_activity_seed THEN 0
+                        ELSE 1
+                    END,
+                    w.last_seen_at DESC NULLS LAST,
+                    w.updated_at DESC
                 LIMIT :limit
                 """
             ),
             {"limit": limit},
         )
         return [str(row.wallet_address) for row in result]
+
+    def count_candidate_wallets(self) -> int:
+        result = self.connection.execute(
+            text("SELECT count(DISTINCT wallet_address) AS count FROM wallet_candidates")
+        ).one()
+        return int(result.count)
+
+    def count_backfilled_wallets(self) -> int:
+        result = self.connection.execute(
+            text(
+                """
+                SELECT count(DISTINCT wallet_address) AS count
+                FROM wallet_backfill_checkpoints
+                WHERE endpoint IN ('/trades', '/positions', '/closed-positions')
+                GROUP BY wallet_address
+                HAVING count(DISTINCT endpoint) = 3
+                """
+            )
+        ).all()
+        return len(result)
+
+    def count_trade_exhausted_wallets(self) -> int:
+        result = self.connection.execute(
+            text(
+                """
+                SELECT count(DISTINCT wallet_address) AS count
+                FROM wallet_backfill_checkpoints
+                WHERE endpoint = '/trades'
+                    AND status = 'exhausted'
+                """
+            )
+        ).one()
+        return int(result.count)
 
     def get_checkpoint_offset(self, wallet_address: str, endpoint: str, taker_only: bool) -> int:
         result = self.connection.execute(
@@ -463,3 +522,31 @@ class WalletDataRepository:
                 ),
                 {"wallet_address": wallet_address, "run_id": run_id},
             )
+
+    def fetch_wallet_timeline(self, wallet_address: str, limit: int) -> list[dict[str, Any]]:
+        result = self.connection.execute(
+            text(
+                """
+                SELECT
+                    trade_uid,
+                    wallet_address,
+                    proxy_wallet,
+                    condition_id,
+                    token_id,
+                    side,
+                    price,
+                    size,
+                    notional,
+                    trade_timestamp,
+                    transaction_hash,
+                    taker_only,
+                    raw
+                FROM trades
+                WHERE wallet_address = :wallet_address
+                ORDER BY trade_timestamp DESC NULLS LAST, created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"wallet_address": wallet_address, "limit": limit},
+        )
+        return [dict(row._mapping) for row in result]

@@ -44,7 +44,7 @@ eb2f49c 新增市场数据模型与采集管道
 codes/
   backend/
     app/
-      api/                  FastAPI API，目前只有 health
+      api/                  FastAPI API：health、wallet timeline
       collectors/           Polymarket 只读采集逻辑
       core/                 配置、日志、run_id
       db/                   数据库连接、schema 迁移、repository
@@ -61,6 +61,7 @@ codes/
     api-probe-report.md
     data-dictionary.md
     market-data-ingestion-report.md
+    wallet-backfill-report.md
   frontend/                 Next.js 占位，尚未开发 dashboard
   infra/
     docker-compose.yml      本地 Postgres、Redis、backend
@@ -134,6 +135,8 @@ codes/
 - `/trades` 回填显式记录 `takerOnly=false`，用稳定字段生成 `trade_uid` 去重。
 - 当前仓位与已平仓仓位分表保存，`realizedPnl` 与 `cashPnl/currentValue` 分离。
 - checkpoint 使用 wallet、endpoint、takerOnly、offset 记录续跑状态。
+- HTTP 429、5xx、临时网络错误有 retry/backoff；单个钱包失败不会中断整批。
+- `GET /wallets/{wallet_address}/timeline` 可查询钱包交易时间线。
 
 已完成真实验收：
 
@@ -158,10 +161,41 @@ mapping_status.mapped: 900
 latest_error: None
 ```
 
+Week03 正式验收：
+
+```text
+wallet_candidates distinct wallets: 1358
+fully backfilled wallets: 320
+trade-exhausted wallets: 108
+trades: 234957
+distinct trade_uid: 234957
+wallet_positions_current: 15513
+wallet_positions_closed: 14142
+wallet_activity_daily: 6557
+failed_wallets: 0
+```
+
+重复写入幂等：
+
+```text
+rows_checked: 20
+before: 234946
+after_first: 234957
+after_second: 234957
+```
+
+时间线 API 验证：
+
+```text
+GET /wallets/0x016909bcb23f59f1022689742014f22d8691043c/timeline?limit=3
+status_code: 200
+trade_count: 3
+```
+
 验证命令：
 
 ```text
-pytest -q: 20 passed, 1 warning
+pytest -q: 22 passed, 1 warning
 ruff check .: passed
 ```
 
@@ -201,10 +235,9 @@ wallet_backfill_checkpoints: 3
 
 钱包与交易：
 
-- Week03 已完成最小闭环和 smoke test，但尚未跑满计划验收规模。
-- 尚需分批运行到不少于 500 个 distinct 候选钱包，并至少回填 100 个钱包。
+- Week03 已完成正式规模验收，可进入 Week04。
 - 尚未处理 maker/taker 双侧钱包归因；当前保留 `takerOnly=false` 口径避免默认漏数。
-- 尚未实现钱包交易时间线 API。
+- 仍有高活跃钱包 `/trades` checkpoint 为 `running`，需要更深历史时可从 offset 续跑。
 
 PnL 与评分：
 
@@ -271,6 +304,12 @@ python -m backend.scripts.backfill_wallet_data --candidate-limit 5 --leaderboard
 python -m backend.scripts.backfill_wallet_data
 ```
 
+钱包时间线 API：
+
+```bash
+curl 'http://127.0.0.1:8000/wallets/<wallet_address>/timeline?limit=100'
+```
+
 小规模 smoke test：
 
 ```bash
@@ -293,22 +332,21 @@ ssh usa
 
 ## 建议下一步
 
-继续 Week03：分批放大钱包发现与历史行为回填。
+进入 Week04：PnL 引擎与对账。
 
 建议顺序：
 
-1. 读 `../polymarket-wallet-tracker-plan/Week03-钱包发现与历史行为回填.md`。
-2. 在已有 Week03 schema 和 `backfill_wallet_data` worker 基础上做分批回填。
-3. 先跑 candidate-only 或小批 10/25/50 钱包，观察限流和失败率。
-4. 达到不少于 500 个候选钱包和 100 个完成回填钱包后，补充正式验收记录。
-5. 保留 `takerOnly=false` 采集，避免漏掉 maker 风格钱包。
-6. 暂不做 PnL、评分、真实下单或复杂 dashboard。
+1. 读 `../polymarket-wallet-tracker-plan/Week04-PnL引擎与对账.md`。
+2. 基于 `trades`、`wallet_positions_current`、`wallet_positions_closed` 设计 realized/unrealized PnL 计算与对账。
+3. 继续保持 `realizedPnl` 与 `cashPnl/currentValue` 分离。
+4. 高活跃钱包若需要更深历史，可从 `wallet_backfill_checkpoints` 续跑。
+5. 暂不做真实下单或复杂 dashboard。
 
 下次会话提示可直接使用：
 
 ```text
 请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week03-钱包发现与历史行为回填.md。
-当前 Week01/Week02 核心能力已完成；Week03 已有 wallets/trades/positions schema、回填 worker 和 smoke test。
-请继续推进 Week03 的分批放大验收：500 个候选钱包、100 个钱包完成 trades/positions/closed_positions 回填。
+当前 Week01/Week02/Week03 核心能力已完成；Week03 已完成 1358 个候选钱包、320 个完整回填钱包、108 个 trade-exhausted 钱包和钱包 timeline API。
+请继续推进 Week04：PnL 引擎与对账。
 保持只读边界，不要把私钥、签名、真实订单执行放到 VPS 或仓库。
 ```
