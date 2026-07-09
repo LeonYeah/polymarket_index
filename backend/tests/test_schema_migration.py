@@ -51,3 +51,19 @@ def test_schema_keeps_realized_and_unrealized_pnl_separate() -> None:
     assert "realized_pnl numeric NOT NULL DEFAULT 0" in SCHEMA_SQL
     assert "unrealized_pnl numeric NOT NULL DEFAULT 0" in SCHEMA_SQL
     assert "current_value numeric NOT NULL DEFAULT 0" in SCHEMA_SQL
+
+
+def test_schema_contains_week05_price_archive_tables() -> None:
+    for table_name in [
+        "price_points",
+        "orderbook_snapshots",
+        "orderbook_top",
+        "orderbook_depth_snapshots",
+        "market_stream_events",
+    ]:
+        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in SCHEMA_SQL
+
+
+def test_schema_records_received_at_for_market_stream_events() -> None:
+    assert "received_at timestamptz NOT NULL" in SCHEMA_SQL
+    assert "event_at timestamptz" in SCHEMA_SQL

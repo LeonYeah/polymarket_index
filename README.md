@@ -1,10 +1,11 @@
 # Polymarket Wallet Tracker
 
-Week01 project skeleton for a read-only Polymarket wallet research system.
+Read-only Polymarket wallet research system covering market ingestion, wallet backfill,
+PnL reconciliation, and price/order book archiving.
 
 ## Layout
 
-- `backend/`: FastAPI service, configuration, API probe, collector primitives.
+- `backend/`: FastAPI service, configuration, API probe, collectors, analytics, and CLIs.
 - `frontend/`: Next.js dashboard placeholder.
 - `infra/`: local Docker Compose for Postgres, Redis, and backend.
 - `docs/`: ADRs, data dictionary, API probe report, and sanitized samples.
@@ -30,6 +31,14 @@ Wallet PnL profile after Week04 calculation:
 ```bash
 python -m backend.scripts.calculate_pnl --wallet-limit 100
 curl 'http://127.0.0.1:8000/wallets/<wallet_address>/profile?market_limit=50'
+```
+
+Price and order book archive after Week05 schema migration:
+
+```bash
+python -m backend.scripts.archive_price_data --token-limit 100
+python -m backend.scripts.archive_price_data --tokens <clob_token_id> --token-limit 1 --depth-limit 3
+python -m backend.scripts.archive_price_data --tokens <clob_token_id> --skip-history --skip-orderbook --websocket --websocket-seconds 30
 ```
 
 Run the read-only API probe:

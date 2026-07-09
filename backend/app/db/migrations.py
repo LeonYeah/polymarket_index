@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week04_pnl_schema_v1"
+SCHEMA_VERSION = "2026_07_09_week05_price_archive_schema_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -421,6 +421,120 @@ CREATE INDEX IF NOT EXISTS pnl_reconciliation_wallet_idx
     ON pnl_reconciliation_checks(wallet_address, checked_at DESC);
 CREATE INDEX IF NOT EXISTS pnl_reconciliation_status_idx
     ON pnl_reconciliation_checks(status, diff_category);
+
+CREATE TABLE IF NOT EXISTS price_points (
+    id bigserial PRIMARY KEY,
+    asset_id text NOT NULL,
+    condition_id text,
+    price_at timestamptz NOT NULL,
+    price numeric NOT NULL,
+    source_endpoint text NOT NULL,
+    interval text,
+    fidelity integer,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS price_points_asset_time_source_idx
+    ON price_points(asset_id, price_at, source_endpoint, COALESCE(interval, ''), COALESCE(fidelity, -1));
+CREATE INDEX IF NOT EXISTS price_points_condition_time_idx
+    ON price_points(condition_id, price_at DESC);
+
+CREATE TABLE IF NOT EXISTS orderbook_snapshots (
+    snapshot_uid text PRIMARY KEY,
+    snapshot_at timestamptz NOT NULL,
+    asset_id text NOT NULL,
+    condition_id text,
+    book_hash text,
+    min_order_size numeric,
+    tick_size numeric,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source_endpoint text NOT NULL,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS orderbook_snapshots_asset_time_idx
+    ON orderbook_snapshots(asset_id, snapshot_at DESC);
+
+CREATE TABLE IF NOT EXISTS orderbook_top (
+    snapshot_uid text PRIMARY KEY REFERENCES orderbook_snapshots(snapshot_uid) ON DELETE CASCADE,
+    snapshot_at timestamptz NOT NULL,
+    asset_id text NOT NULL,
+    condition_id text,
+    best_bid numeric,
+    best_bid_size numeric,
+    best_ask numeric,
+    best_ask_size numeric,
+    midpoint numeric,
+    spread numeric,
+    spread_bps numeric,
+    top_bid_depth numeric NOT NULL DEFAULT 0,
+    top_ask_depth numeric NOT NULL DEFAULT 0,
+    crossed boolean NOT NULL DEFAULT false,
+    one_sided boolean NOT NULL DEFAULT false,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS orderbook_top_asset_time_idx
+    ON orderbook_top(asset_id, snapshot_at DESC);
+CREATE INDEX IF NOT EXISTS orderbook_top_spread_idx
+    ON orderbook_top(spread DESC NULLS LAST);
+
+CREATE TABLE IF NOT EXISTS orderbook_depth_snapshots (
+    snapshot_uid text NOT NULL REFERENCES orderbook_snapshots(snapshot_uid) ON DELETE CASCADE,
+    snapshot_at timestamptz NOT NULL,
+    asset_id text NOT NULL,
+    condition_id text,
+    side text NOT NULL,
+    level_index integer NOT NULL,
+    price numeric NOT NULL,
+    size numeric NOT NULL,
+    notional numeric NOT NULL,
+    cumulative_size numeric NOT NULL,
+    cumulative_notional numeric NOT NULL,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (snapshot_uid, side, level_index)
+);
+
+CREATE INDEX IF NOT EXISTS orderbook_depth_asset_side_time_idx
+    ON orderbook_depth_snapshots(asset_id, side, snapshot_at DESC);
+
+CREATE TABLE IF NOT EXISTS market_stream_events (
+    stream_event_uid text PRIMARY KEY,
+    received_at timestamptz NOT NULL,
+    event_at timestamptz,
+    asset_id text,
+    condition_id text,
+    event_type text NOT NULL,
+    book_hash text,
+    best_bid numeric,
+    best_ask numeric,
+    midpoint numeric,
+    spread numeric,
+    raw jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL,
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS market_stream_events_asset_received_idx
+    ON market_stream_events(asset_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS market_stream_events_type_idx
+    ON market_stream_events(event_type);
 """
 
 

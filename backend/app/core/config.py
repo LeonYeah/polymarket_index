@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     wallet_backfill_retry_attempts: int = 3
     wallet_backfill_retry_base_seconds: float = 1.0
 
+    price_archive_token_limit: int = 100
+    price_archive_history_interval: str = "1d"
+    price_archive_history_fidelity: int | None = None
+    price_archive_orderbook_depth_limit: int = 20
+    price_archive_websocket_seconds: float = 30.0
+    price_archive_websocket_event_limit: int = 100
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -2,7 +2,7 @@
 
 更新时间：2026-07-09
 
-下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md`。当前主线应从 Week05 开始。
+下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md`。当前主线是完成 Week05 的正式 100 市场与 24 小时归档验收，然后进入 Week06。
 
 ## 目标与边界
 
@@ -21,7 +21,7 @@
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
 - Python venv：`codes/.venv`
 - VPS 登录：`ssh usa`
-- 最新代码提交：`f6feaa6 完成Week04盈亏引擎与对账`
+- 最新阶段：Week05 价格与订单簿归档基础闭环已实现，具体提交以 `git log --oneline -5` 为准。
 - VPS 状态：`/home/lee/workspace/search/codes` 是空 Git 仓库，没有需要提交的代码。
 
 ## 当前架构
@@ -32,7 +32,7 @@ codes/
     app/
       analytics/            PnL 引擎与钱包画像聚合
       api/                  FastAPI: health、wallet timeline、wallet profile
-      collectors/           Polymarket 只读 API 采集、市场数据、钱包回填
+      collectors/           Polymarket 只读 API 采集、市场数据、钱包回填、价格归档
       core/                 配置、日志、run_id
       db/                   PostgreSQL 连接、schema、repository
       domain/               领域模型草案
@@ -42,12 +42,14 @@ codes/
       ingest_market_data.py 市场、容量、holders 采集
       backfill_wallet_data.py 钱包发现、交易、仓位回填
       calculate_pnl.py      PnL 计算与 closed-position 对账
-    tests/                  health、schema、解析、钱包回填、PnL 测试
+      archive_price_data.py 价格历史、订单簿、market WebSocket 归档
+    tests/                  health、schema、解析、钱包回填、PnL、价格归档测试
   docs/
     api-probe-report.md
     market-data-ingestion-report.md
     wallet-backfill-report.md
     pnl-engine-report.md
+    price-archive-report.md
     data-dictionary.md
   frontend/                 Next.js 占位，尚未开发 dashboard
   infra/                    Docker Compose: Postgres、Redis、backend
@@ -98,6 +100,16 @@ PnL 引擎与对账：
 - Week04 验收数据：处理钱包 100、失败 0、`wallet_market_results=16181`、`wallet_daily_equity_rows=4637`、`reconciliation_checks=2703`。
 - 当前验证：`pytest -q` 为 27 passed、1 warning；`ruff check .` 通过。
 
+价格与订单簿归档：
+
+- 已建表：`price_points`、`orderbook_snapshots`、`orderbook_top`、`orderbook_depth_snapshots`、`market_stream_events`。
+- 已实现 CLOB `prices-history` 回填、`book` 快照归档、market WebSocket 短时归档。
+- 订单簿归档拆出 best_bid、best_ask、midpoint、spread、spread_bps、top depth、有限档深度。
+- WebSocket 事件同时保留 `received_at` 与 payload 原始事件时间 `event_at`，raw payload 入库。
+- 已实现 CLV 基础函数，按 BUY/SELL 调整符号；已实现保守订单簿滑点估算函数。
+- CLI：`python -m backend.scripts.archive_price_data --token-limit 100`。
+- Week05 smoke：1 token 写入 `price_points=1440`、`orderbook_snapshots=1`、`orderbook_depth_snapshots=6`；2 秒 WebSocket 写入 `market_stream_events=1`。
+
 ## 关键口径
 
 - `/trades?takerOnly=false` 是采集口径，不是单笔 maker/taker 角色证据。
@@ -107,14 +119,17 @@ PnL 引擎与对账：
 - `data/live-volume` 可能返回不在当前 market 批次里的 condition_id，容量快照表不强制 FK 到 `markets`。
 - token 映射按 `clobTokenIds` 与 `outcomes` 顺序建立；长度不一致标记 `mapping_status=failed`。
 - 不要用最后成交价替代可成交价格；Week05 应使用订单簿、spread、depth 做估算。
+- `prices-history` 不是历史完整订单簿，不能据此声称精确模拟滑点。
+- `market_stream_events.received_at` 是延迟估算主时间；payload `event_at` 可能乱序或延迟。
 
 ## 未完成与债务
 
 下一阶段主线：
 
-- Week05 价格与订单簿归档尚未实现。
-- 尚未建立价格历史、订单簿快照、spread/depth/slippage 表和采集任务。
-- 尚未把可成交价格、滑点、订单簿深度接入 PnL 和容量分析。
+- Week05 基础代码已实现，但尚未完成 100 个活跃市场价格历史正式回填验收。
+- 尚未完成 watchlist 市场 24 小时连续订单簿/WebSocket 归档验收。
+- CLV 目前是基础函数，尚未批量物化到 Week03/Week04 历史交易。
+- 尚未把 Week05 订单簿滑点、spread/depth 接入 PnL enrichment 和容量分析。
 
 分析能力：
 
@@ -161,6 +176,10 @@ python -m backend.scripts.backfill_wallet_data --candidate-limit 5 --leaderboard
 # PnL smoke
 python -m backend.scripts.calculate_pnl --wallet-limit 5 --profile-limit 2
 
+# 价格与订单簿 smoke
+python -m backend.scripts.archive_price_data --tokens <clob_token_id> --token-limit 1 --depth-limit 3
+python -m backend.scripts.archive_price_data --tokens <clob_token_id> --skip-history --skip-orderbook --websocket --websocket-seconds 2 --websocket-event-limit 2
+
 # API
 uvicorn backend.app.main:app --reload
 curl http://127.0.0.1:8000/health
@@ -173,20 +192,20 @@ docker compose -f infra/docker-compose.yml down
 
 ## 下一步建议
 
-直接进入 Week05：价格与订单簿归档。
+完成 Week05 正式验收并准备进入 Week06。
 
 建议顺序：
 
-1. 阅读 `../polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md`。
-2. 设计价格历史和订单簿快照 schema，优先覆盖 CLOB `book`、`prices-history`、WebSocket。
-3. 实现只读归档 CLI 或小规模定时采集，先做 smoke，再扩大范围。
-4. 输出 spread、depth、可成交价格和 slippage 估算。
-5. 将 Week05 结果接入 PnL v1 的 `estimated_slippage`、可成交价格和容量分析。
+1. 跑 `python -m backend.scripts.archive_price_data --token-limit 100`，完成 100 token 价格历史正式回填。
+2. 对 watchlist 跑较长时间 `--websocket` 和订单簿快照归档，记录断线/重连情况。
+3. 为历史 trades 增加 CLV 批量物化 job 或查询 API。
+4. 将订单簿滑点和 spread/depth 接入 PnL v1 的 `estimated_slippage` 或画像 enrichment。
+5. 验收通过后进入 Week06：SmartScore 与统计回测。
 
 下次会话可直接提示：
 
 ```text
 请先阅读 codes/introduction.md 和 polymarket-wallet-tracker-plan/Week05-价格与订单簿归档.md。
-当前 Week01-Week04 已完成：只读 API 探针、市场/容量/holders 采集、钱包发现与历史回填、钱包 timeline API、PnL 引擎、钱包 profile API、100 钱包 PnL 验收和 closed-position 对账。
-请继续推进 Week05：价格与订单簿归档。保持只读边界，不要加入私钥、签名、真实下单或交易凭证。
+当前 Week01-Week04 已完成；Week05 已实现价格历史、订单簿、WebSocket 归档基础闭环和 CLV/滑点基础函数，但尚未完成 100 token 与 24 小时连续归档正式验收。
+请继续完成 Week05 验收或准备 Week06 SmartScore 与统计回测。保持只读边界，不要加入私钥、签名、真实下单或交易凭证。
 ```

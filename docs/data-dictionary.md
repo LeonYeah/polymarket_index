@@ -111,24 +111,58 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `source_realized_pnl` | decimal | Data API | Closed position realized PnL used for comparison. |
 | `difference` | decimal | Derived | Engine minus source value. |
 
-## Price
+## Price Archive
 
 | Field | Type | Source | Notes |
 |---|---|---|---|
-| `asset_id` | string | CLOB | Outcome token ID. |
-| `timestamp_utc` | timestamp | CLOB | Normalize all history points to UTC. |
-| `price` | decimal | CLOB | Historical price/midpoint depending on endpoint parameter. |
-| `bid` | decimal | CLOB | Best bid for live snapshots. |
-| `ask` | decimal | CLOB | Best ask for live snapshots. |
-| `midpoint` | decimal | Derived/CLOB | `(bid + ask) / 2` when both sides exist. |
+| `price_points.asset_id` | string | CLOB | Outcome token ID. |
+| `price_points.condition_id` | string | CLOB | Market/condition ID when available in payload. |
+| `price_points.price_at` | timestamp | CLOB | Historical point timestamp normalized to UTC. |
+| `price_points.price` | decimal | CLOB | Historical price from `prices-history`. Not historical depth. |
+| `price_points.source_endpoint` | string | Internal | Currently `clob.prices-history`. |
+| `price_points.interval` | string | CLOB request | Requested interval, for example `1d`. |
+| `price_points.fidelity` | integer | CLOB request | Requested fidelity when supplied. |
 
 ## Order Book
 
 | Field | Type | Source | Notes |
 |---|---|---|---|
-| `asset_id` | string | CLOB | Outcome token ID. |
-| `snapshot_utc` | timestamp | Internal | Time the book response was observed. |
-| `bids` | array | CLOB | Price/size levels as decimal strings. |
-| `asks` | array | CLOB | Price/size levels as decimal strings. |
-| `spread` | decimal | CLOB/Derived | Best ask minus best bid. |
-| `depth_notional` | decimal | Derived | Future followability metric at fixed slippage bands. |
+| `orderbook_snapshots.snapshot_uid` | string | Derived | Stable snapshot ID for top and depth rows. |
+| `orderbook_snapshots.snapshot_at` | timestamp | Internal | Time the HTTP `book` response was observed. |
+| `orderbook_snapshots.asset_id` | string | CLOB | Outcome token ID. |
+| `orderbook_snapshots.condition_id` | string | CLOB | Market/condition ID when available. |
+| `orderbook_snapshots.book_hash` | string | CLOB | CLOB book hash when present. |
+| `orderbook_top.best_bid/best_ask` | decimal | CLOB/Derived | Top executable bid/ask from finite depth snapshot. |
+| `orderbook_top.midpoint` | decimal | Derived | `(best_bid + best_ask) / 2` when both sides exist. |
+| `orderbook_top.spread` | decimal | Derived | Best ask minus best bid. |
+| `orderbook_top.spread_bps` | decimal | Derived | Spread divided by midpoint, in basis points. |
+| `orderbook_top.top_bid_depth/top_ask_depth` | decimal | Derived | Sum of retained size levels per side. |
+| `orderbook_top.crossed` | boolean | Derived | True when best ask is below best bid. |
+| `orderbook_top.one_sided` | boolean | Derived | True when only bid or ask side exists. |
+| `orderbook_depth_snapshots.side` | string | CLOB | `bid` or `ask`. |
+| `orderbook_depth_snapshots.level_index` | integer | Derived | One-based depth level after side-aware sorting. |
+| `orderbook_depth_snapshots.price/size` | decimal | CLOB | Level price and size. |
+| `orderbook_depth_snapshots.cumulative_size` | decimal | Derived | Cumulative size through this level. |
+| `orderbook_depth_snapshots.cumulative_notional` | decimal | Derived | Cumulative price * size through this level. |
+
+## Market Stream
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `market_stream_events.stream_event_uid` | string | Derived | Stable event ID. |
+| `market_stream_events.received_at` | timestamp | Internal | System receive time; primary latency reference. |
+| `market_stream_events.event_at` | timestamp | CLOB WS | Payload timestamp when present; may be delayed/out of order. |
+| `market_stream_events.asset_id` | string | CLOB WS | Outcome token ID when present. |
+| `market_stream_events.condition_id` | string | CLOB WS | Market/condition ID when present. |
+| `market_stream_events.event_type` | string | CLOB WS | `price_change`, `book`, `last_trade`, `best_bid_ask`, or payload-specific type. |
+| `market_stream_events.best_bid/best_ask` | decimal | CLOB/Derived | Parsed from fields or top book levels. |
+| `market_stream_events.midpoint/spread` | decimal | Derived | Computed when both sides are available. |
+| `market_stream_events.raw` | json | CLOB WS | Full raw WebSocket payload for audit. |
+
+## CLV
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `reference_price` | decimal | Derived | Prefer delay-adjusted midpoint; fallback to `price_points.price`. |
+| `future_price` | decimal | Derived | Future midpoint or price point at target horizon. |
+| `clv_30s/2m/10m/1h/24h` | decimal | Derived | `future_price - reference_price` for buys; sign reversed for sells. |
