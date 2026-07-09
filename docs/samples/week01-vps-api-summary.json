@@ -1,0 +1,146 @@
+{
+  "collected_at_utc": "2026-07-09T02:01:15.597617+00:00",
+  "probe_node": "usa",
+  "condition_id": "0x1fad72fae204143ff1c3035e99e7c0f65ea8d5cd9bd1070987bd1a3316f772be",
+  "token_id": "98022490269692409998126496127597032490334070080325855126491859374983463996227",
+  "wallet": "0x13868e88acbe44daa175fe8051cf212f5442373a",
+  "summary": [
+    {
+      "name": "gamma.markets.keyset",
+      "ok": true,
+      "status": 200,
+      "ms": 274,
+      "shape": "dict:$schema,markets,next_cursor",
+      "count": 5
+    },
+    {
+      "name": "gamma.events.keyset",
+      "ok": true,
+      "status": 200,
+      "ms": 235,
+      "shape": "dict:$schema,events,next_cursor",
+      "count": 5
+    },
+    {
+      "name": "gamma.markets.empty",
+      "ok": true,
+      "status": 200,
+      "ms": 228,
+      "shape": "dict:$schema,markets",
+      "count": 0
+    },
+    {
+      "name": "gamma.markets.invalid",
+      "ok": false,
+      "status": 422,
+      "ms": 193,
+      "error": "invalid integer"
+    },
+    {
+      "name": "data.trades.takerOnly_false",
+      "ok": true,
+      "status": 200,
+      "ms": 291,
+      "shape": "list",
+      "count": 10
+    },
+    {
+      "name": "data.trades.takerOnly_true",
+      "ok": true,
+      "status": 200,
+      "ms": 201,
+      "shape": "list",
+      "count": 10
+    },
+    {
+      "name": "data.leaderboard",
+      "ok": true,
+      "status": 200,
+      "ms": 188,
+      "shape": "list",
+      "count": 10
+    },
+    {
+      "name": "data.holders",
+      "ok": true,
+      "status": 200,
+      "ms": 233,
+      "shape": "list",
+      "count": 2
+    },
+    {
+      "name": "data.positions",
+      "ok": true,
+      "status": 200,
+      "ms": 262,
+      "shape": "list",
+      "count": 6
+    },
+    {
+      "name": "data.closed_positions",
+      "ok": true,
+      "status": 200,
+      "ms": 323,
+      "shape": "list",
+      "count": 10
+    },
+    {
+      "name": "data.trades.empty",
+      "ok": true,
+      "status": 200,
+      "ms": 286,
+      "shape": "list",
+      "count": 0
+    },
+    {
+      "name": "data.positions.invalid",
+      "ok": false,
+      "status": 400,
+      "ms": 204,
+      "error": "required query param 'user' not provided"
+    },
+    {
+      "name": "data.oi",
+      "ok": true,
+      "status": 200,
+      "ms": 265,
+      "shape": "list",
+      "count": 1
+    },
+    {
+      "name": "data.live_volume",
+      "ok": false,
+      "status": 400,
+      "ms": 219,
+      "error": "required query param 'id' not provided"
+    },
+    {
+      "name": "clob.book",
+      "ok": true,
+      "status": 200,
+      "ms": 174,
+      "shape": "dict:market,asset_id,timestamp,hash,bids,asks,min_order_size,tick_size"
+    },
+    {
+      "name": "clob.prices_history",
+      "ok": true,
+      "status": 200,
+      "ms": 55,
+      "shape": "dict:history"
+    },
+    {
+      "name": "clob.market_by_condition",
+      "ok": true,
+      "status": 200,
+      "ms": 187,
+      "shape": "dict:enable_order_book,active,closed,archived,accepting_orders,accepting_order_timestamp,minimum_order_size,minimum_tick_size"
+    },
+    {
+      "name": "clob.book.invalid",
+      "ok": false,
+      "status": 404,
+      "ms": 179,
+      "error": "No orderbook exists for the requested token id"
+    }
+  ]
+}

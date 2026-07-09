@@ -1,0 +1,16 @@
+{
+  "collected_at_utc": "2026-07-09T02:01:49.340314+00:00",
+  "probe_node": "usa",
+  "host": "ws-subscriptions-clob.polymarket.com",
+  "path": "/ws/market",
+  "token_id": "98022490269692409998126496127597032490334070080325855126491859374983463996227",
+  "handshake_status": "HTTP/1.1 101 Switching Protocols",
+  "handshake_ok": true,
+  "ok": true,
+  "duration_ms": 593,
+  "first_message": {
+    "opcode": 1,
+    "bytes": 2511,
+    "shape": "market orderbook snapshot with market, asset_id, timestamp, hash, bids, asks"
+  }
+}
