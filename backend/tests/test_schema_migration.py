@@ -87,3 +87,21 @@ def test_schema_records_score_reproducibility_fields() -> None:
     assert "weight_config jsonb NOT NULL DEFAULT '{}'::jsonb" in SCHEMA_SQL
     assert "input_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb" in SCHEMA_SQL
     assert "hard_gate_status jsonb NOT NULL DEFAULT '{}'::jsonb" in SCHEMA_SQL
+
+
+def test_schema_contains_week07_dashboard_alert_tables() -> None:
+    for table_name in [
+        "watchlist_wallets",
+        "watchlist_markets",
+        "watchlist_audit_log",
+        "alert_events",
+    ]:
+        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in SCHEMA_SQL
+
+
+def test_schema_records_alert_lifecycle_and_watchlist_audit() -> None:
+    assert "status text NOT NULL DEFAULT 'open'" in SCHEMA_SQL
+    assert "acknowledged_at timestamptz" in SCHEMA_SQL
+    assert "resolved_at timestamptz" in SCHEMA_SQL
+    assert "target_type text NOT NULL" in SCHEMA_SQL
+    assert "operator text NOT NULL DEFAULT 'local'" in SCHEMA_SQL

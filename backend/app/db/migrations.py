@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week06_smart_score_schema_v1"
+SCHEMA_VERSION = "2026_07_09_week07_dashboard_alerts_schema_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -728,6 +728,77 @@ CREATE TABLE IF NOT EXISTS backtest_wallet_results (
 
 CREATE INDEX IF NOT EXISTS backtest_wallet_results_run_strategy_idx
     ON backtest_wallet_results(backtest_run_uid, strategy, strategy_rank);
+
+CREATE TABLE IF NOT EXISTS watchlist_wallets (
+    wallet_address text PRIMARY KEY,
+    label text,
+    reason text,
+    status text NOT NULL DEFAULT 'active',
+    operator text NOT NULL DEFAULT 'local',
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    added_at timestamptz NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS watchlist_wallets_status_idx
+    ON watchlist_wallets(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS watchlist_markets (
+    condition_id text PRIMARY KEY,
+    label text,
+    reason text,
+    status text NOT NULL DEFAULT 'active',
+    operator text NOT NULL DEFAULT 'local',
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    added_at timestamptz NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS watchlist_markets_status_idx
+    ON watchlist_markets(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS watchlist_audit_log (
+    id bigserial PRIMARY KEY,
+    target_type text NOT NULL,
+    target_id text NOT NULL,
+    action text NOT NULL,
+    operator text NOT NULL DEFAULT 'local',
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS watchlist_audit_target_idx
+    ON watchlist_audit_log(target_type, target_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+    alert_id text PRIMARY KEY,
+    alert_type text NOT NULL,
+    severity text NOT NULL DEFAULT 'info',
+    status text NOT NULL DEFAULT 'open',
+    wallet_address text,
+    condition_id text,
+    token_id text,
+    title text NOT NULL,
+    message text NOT NULL,
+    evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+    first_seen_at timestamptz NOT NULL,
+    last_seen_at timestamptz NOT NULL,
+    acknowledged_at timestamptz,
+    resolved_at timestamptz,
+    operator text,
+    source text NOT NULL DEFAULT 'dashboard_rules_v1',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS alert_events_status_idx
+    ON alert_events(status, severity, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS alert_events_market_idx
+    ON alert_events(condition_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS alert_events_wallet_idx
+    ON alert_events(wallet_address, last_seen_at DESC);
 """
 
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
 
 from backend.app.db.database import make_engine
+from backend.app.db.dashboard_repository import DashboardRepository
 from backend.app.db.smart_score_repository import SmartScoreRepository
 
 router = APIRouter(prefix="/scores", tags=["scores"])
@@ -28,3 +29,12 @@ def score_leaderboard(
         "high_confidence_only": high_confidence_only,
         "leaderboard": jsonable_encoder(rows),
     }
+
+
+@router.get("/backtests/latest")
+def latest_backtest_summary() -> dict[str, Any]:
+    engine = make_engine()
+    with engine.begin() as connection:
+        repository = DashboardRepository(connection)
+        row = repository.fetch_latest_backtest_summary()
+    return {"backtest": jsonable_encoder(row or {})}

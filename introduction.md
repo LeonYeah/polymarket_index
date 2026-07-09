@@ -2,7 +2,7 @@
 
 更新时间：2026-07-09
 
-下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week07-API-Dashboard与提醒.md`。当前主线可进入 Week07：补 Dashboard/API 与提醒能力。若排行榜高置信钱包为空，优先展示 failed gate 原因，不要隐藏数据。
+下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。当前主线可进入 Week08：基于 Week07 的 Dashboard、watchlist 和告警做纸面跟单闭环。
 
 ## 项目目标与边界
 
@@ -21,9 +21,9 @@
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
 - Python venv：`/home/lee/workspace/search/codes/.venv`
 - VPS 登录：`ssh usa`
-- 最新阶段：Week01-Week06 已完成工程闭环，最新提交以 `git log --oneline -5` 为准。
+- 最新阶段：Week01-Week07 已完成工程闭环，最新提交以 `git log --oneline -5` 为准。
 - VPS 状态：`/home/lee/workspace/search/codes` 是空 Git 仓库，目前没有需要提交的代码。
-- 当前验证：`pytest -q` 为 46 passed、1 warning；`ruff check .` 通过。
+- 当前验证：`pytest -q` 为 49 passed、1 warning；`ruff check .` 通过；前端用 Linux Node 直接执行 `node node_modules/next/dist/bin/next build` 通过。
 
 ## 当前架构
 
@@ -34,7 +34,7 @@ codes/
       collectors/   Polymarket 只读 API、市场、钱包、价格、订单簿、WebSocket 采集
       analytics/    PnL 引擎、钱包画像、SmartScore、统计回测
       db/           PostgreSQL schema、repository、迁移
-      api/          health、wallet timeline/profile、score leaderboard
+      api/          health、wallet、market、score、watchlist、alert 查询接口
       core/         配置、日志、run_id
     scripts/
       api_probe.py
@@ -44,9 +44,9 @@ codes/
       calculate_pnl.py
       archive_price_data.py
       score_wallets.py
-    tests/          schema、采集归一化、钱包回填、PnL、价格归档、SmartScore
+    tests/          schema、采集归一化、钱包回填、PnL、价格归档、SmartScore、Week07 路由
   docs/             API/采集/PnL/价格归档/SmartScore 报告、数据字典、样例
-  frontend/         Next.js 占位，尚未开发 dashboard
+  frontend/         Next.js Dashboard、钱包详情、市场详情、告警操作、watchlist 表单
   infra/            Docker Compose: Postgres、Redis、backend
 ```
 
@@ -59,7 +59,7 @@ codes/
 - FastAPI 后端骨架、`/health`、配置系统、结构化日志、run_id。
 - Docker Compose 可启动 Postgres、Redis、backend。
 - `.env.example` 不含私密凭证，已覆盖市场、钱包、价格归档配置。
-- 数据库迁移集中在 `backend/app/db/migrations.py`，当前 schema 到 Week06。
+- 数据库迁移集中在 `backend/app/db/migrations.py`，当前 schema 到 Week07。
 
 只读 API 与市场数据：
 
@@ -108,6 +108,18 @@ SmartScore 与统计回测：
 - CLI：`python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20 --backtest`。
 - 关键报告：`docs/smart-score-report.md`。
 
+API、Dashboard 与提醒：
+
+- 已实现 Dashboard API：`GET /wallets/top`、`GET /wallets/{address}`、`GET /wallets/{address}/markets`、`GET /markets`、`GET /markets/{market_id}`、`GET /markets/{market_id}/smart-flow`。
+- 已实现提醒 API：`GET /alerts` 请求时可生成告警；`PATCH /alerts/{alert_id}` 支持 open/ack/resolved。
+- 已实现 watchlist API：`POST /watchlist/wallets`、`POST /watchlist/markets`，并记录 `watchlist_audit_log`。
+- 已实现 `GET /scores/backtests/latest` 供 Dashboard 展示最近回测摘要。
+- 已落库 Week07 表：`watchlist_wallets`、`watchlist_markets`、`watchlist_audit_log`、`alert_events`。
+- 告警规则 v1：高分钱包新建仓、多个高分钱包进入同一市场、临近结束大额建仓、spread/深度恶化、数据采集延迟。
+- Next.js Dashboard 首屏展示排行榜、市场监控、告警中心和回测摘要。
+- 钱包详情页展示 score、confidence、realized/unrealized PnL、收益曲线、市场列表、类别分布、CLV 分布、近期交易、hard gate 状态。
+- 市场详情页展示元数据、outcome/token 映射、订单簿、top holders、高分钱包流入和相关告警。
+
 ## 关键口径
 
 - `/trades?takerOnly=false` 是采集口径，不是单笔 maker/taker 角色证据。
@@ -124,9 +136,10 @@ SmartScore 与统计回测：
 
 当前主线：
 
-- Week07 Dashboard 与提醒尚未实现。
-- 前端仍是 Next.js 占位，没有可用 dashboard。
-- Dashboard API 仍不完整：缺评分组件详情、回测摘要、市场/钱包聚合查询、提醒查询。
+- Week08 纸面跟单系统尚未实现。
+- Dashboard 目前是本地只读研究工具，尚未做登录认证；MVP 可先本地使用。
+- 告警规则使用当前已落库数据在 `GET /alerts?generate=true` 请求时生成/upsert，尚未接入调度器。
+- API p95 尚未在真实本地大数据量下压测；当前完成合同测试和静态构建验证。
 
 数据与分析债务：
 
@@ -141,6 +154,7 @@ SmartScore 与统计回测：
 - raw API response 已归档，但 market、event、trade、position、holder、orderbook 的 schema/contract 测试还不够细。
 - `outcome_correct` 只有在 closed position 的 `cur_price` 证据足够强时才设置，否则保持 null。
 - Daily equity v1 是 UTC 日期级，不是 tick 级净值。
+- market smart-flow 依赖最新 `wallet_scores` 和 `wallet_positions_current`；若评分或仓位未刷新，页面会展示旧快照。
 
 生产化债务：
 
@@ -183,9 +197,20 @@ python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 2
 # API
 uvicorn backend.app.main:app --reload
 curl http://127.0.0.1:8000/health
+curl 'http://127.0.0.1:8000/wallets/top?limit=100'
 curl 'http://127.0.0.1:8000/wallets/<wallet_address>/timeline?limit=100'
 curl 'http://127.0.0.1:8000/wallets/<wallet_address>/profile?market_limit=50'
+curl 'http://127.0.0.1:8000/wallets/<wallet_address>?market_limit=50'
 curl 'http://127.0.0.1:8000/scores/leaderboard?limit=50'
+curl 'http://127.0.0.1:8000/markets?limit=100'
+curl 'http://127.0.0.1:8000/markets/<condition_id>'
+curl 'http://127.0.0.1:8000/alerts?limit=50&generate=true'
+
+# 前端
+cd frontend
+npm install
+PATH=/home/lee/.vscode-remote-containers/bin/618725e67565b290ba4da6fe2d29f8fa1d4e3622:$PATH \
+  node node_modules/next/dist/bin/next dev
 ```
 
 24 小时 watchlist 归档形态：
@@ -203,9 +228,8 @@ python -m backend.scripts.archive_price_data \
 
 ## 下一步建议
 
-1. 阅读 `../polymarket-wallet-tracker-plan/Week07-API-Dashboard与提醒.md`。
-2. 先补 Dashboard API：排行榜、评分组件拆解、回测摘要、钱包详情、提醒状态。
-3. 再开发前端实际工具界面；不要做营销 landing page。
-4. 排行榜若没有高置信钱包，展示 all-ranked、confidence、failed gates 和原因。
-5. 若要提升评分质量，先补跑高价值 token 的订单簿/CLV，再扩大 `score_wallets --wallet-limit`。
-6. 全程保持只读边界，不引入私钥、签名、真实下单或交易凭证。
+1. 阅读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。
+2. 先把 Week07 告警生成从请求时执行迁移到定时任务或 CLI，作为纸面跟单信号输入。
+3. 纸面跟单只记录模拟订单和模拟持仓，不接入真实下单。
+4. 继续展示 all-ranked、confidence、failed gates 和原因，避免隐藏未通过高置信门槛的钱包。
+5. 若要提升信号质量，先补跑高价值 token 的订单簿/CLV，再扩大 `score_wallets --wallet-limit`。

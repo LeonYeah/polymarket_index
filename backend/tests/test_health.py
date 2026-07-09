@@ -16,3 +16,22 @@ def test_wallet_timeline_route_is_registered() -> None:
     client = TestClient(create_app())
     paths = client.get("/openapi.json").json()["paths"]
     assert "/wallets/{wallet_address}/timeline" in paths
+
+
+def test_week07_dashboard_routes_are_registered() -> None:
+    client = TestClient(create_app())
+    paths = client.get("/openapi.json").json()["paths"]
+    for path in [
+        "/wallets/top",
+        "/wallets/{wallet_address}",
+        "/wallets/{wallet_address}/markets",
+        "/markets",
+        "/markets/{market_id}",
+        "/markets/{market_id}/smart-flow",
+        "/alerts",
+        "/alerts/{alert_id}",
+        "/watchlist/wallets",
+        "/watchlist/markets",
+        "/scores/backtests/latest",
+    ]:
+        assert path in paths
