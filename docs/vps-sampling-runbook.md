@@ -18,7 +18,7 @@
 |---|---|---|
 | `polymarket-api.service` | 常驻 | 本地回环 FastAPI。 |
 | `polymarket-sampler.service` | 常驻 | 每分钟执行增量交易、相关订单簿和 paper cycle。 |
-| `polymarket-maintenance.timer` | 6 小时 | 刷新市场元数据、PnL 和 SmartScore。 |
+| `polymarket-maintenance.timer` | 6 小时 | 刷新市场、发现候选钱包、受限回填、PnL 和 SmartScore。 |
 | `polymarket-health.timer` | 5 分钟 | 检查连续周期是否在 300 秒 freshness SLA 内。 |
 | `polymarket-backup.timer` | 每日 | PostgreSQL custom dump，保留 14 天。 |
 
@@ -59,6 +59,16 @@ node node_modules/next/dist/bin/next dev -H 127.0.0.1 -p 3000
 随后访问 `http://127.0.0.1:3000/paper`。不要把 VPS 的 8000 或 5432 端口开放到公网。
 
 ## 数据采样语义
+
+### 候选钱包持续发现
+
+`polymarket-maintenance.timer` 每 6 小时重新扫描 DAY/WEEK/MONTH/ALL leaderboard、
+最新 market holders 和活跃交易者。候选记录幂等 upsert；每轮最多回填 25 个优先候选，
+每个钱包最多读取 2 页交易，再刷新 current/closed positions。候选发现失败不会阻止后续
+PnL 和 SmartScore 使用上一份可用快照继续刷新。
+
+这条维护链路用于扩充候选池；每分钟 sampler 仍只轮询 watchlist、已通过高置信门槛或达到
+分数/置信度阈值的钱包，避免对整个候选池进行高频重采集。
 
 连续周期按以下顺序运行：
 

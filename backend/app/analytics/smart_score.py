@@ -11,7 +11,7 @@ from typing import Any
 ZERO = Decimal("0")
 ONE = Decimal("1")
 HUNDRED = Decimal("100")
-SMART_SCORE_VERSION = "smart_score_v1"
+SMART_SCORE_VERSION = "smart_score_v2"
 FEATURE_VERSION = "wallet_features_v1"
 
 WEIGHT_CONFIG: dict[str, Decimal] = {
@@ -262,7 +262,6 @@ def _hard_gate_status(features: Mapping[str, Any]) -> dict[str, bool]:
         "net_roi_180d_gte_8pct": as_decimal(features.get("net_roi_180d")) >= Decimal("0.08"),
         "bayes_wr_gte_55pct": as_decimal(features.get("bayes_wr")) >= Decimal("0.55"),
         "max_dd_lte_20pct": as_decimal(features.get("max_drawdown_ratio")) <= Decimal("0.20"),
-        "single_market_pnl_share_lte_30pct": as_decimal(features.get("single_market_pnl_share")) <= Decimal("0.30"),
         "followability_gte_60": as_decimal(features.get("avg_followability")) >= Decimal("60"),
     }
 

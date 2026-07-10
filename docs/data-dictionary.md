@@ -208,12 +208,12 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | Field | Type | Source | Notes |
 |---|---|---|---|
 | `score_uid` | string | Derived | Stable hash over wallet, score version, and scoring time. |
-| `score_version` | string | Internal | Versioned scoring contract, currently `smart_score_v1`. |
+| `score_version` | string | Internal | Versioned scoring contract; current writes use `smart_score_v2`, while v1 rows remain auditable. |
 | `score` | decimal | Derived | Final 0-100 score after caps and penalties. |
 | `raw_score` | decimal | Derived | Component sum before caps and penalties. |
 | `confidence` | decimal | Derived | 0-1 confidence from sample size, activity, followability, CLV coverage, and unrealized-PnL concentration. |
 | `high_confidence_eligible` | boolean | Derived | True only when all hard gates pass. |
-| `hard_gate_status` | json | Derived | Per-gate boolean status for resolved count, activity, notional, ROI, Bayesian WR, drawdown, concentration, and followability. |
+| `hard_gate_status` | json | Derived | V2 per-gate status for resolved count, activity, notional, ROI, Bayesian WR, drawdown, and followability. Market concentration remains a soft penalty, not an eligibility gate. |
 | `exclusion_reasons` | json | Derived | Failed gate names. |
 | `penalty_summary` | json | Derived | Score caps and deductions, including small sample and single-market concentration. |
 | `weight_config` | json | Internal | Component weights used for reproducible scoring. |

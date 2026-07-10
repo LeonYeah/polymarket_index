@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from backend.app.analytics.smart_score import (
+    SMART_SCORE_VERSION,
     calculate_bayesian_win_rate,
     score_wallet_features,
     select_backtest_strategies,
@@ -55,6 +56,7 @@ def test_smart_score_marks_high_confidence_wallet_eligible() -> None:
     )
 
     assert result.high_confidence_eligible is True
+    assert result.score_version == "smart_score_v2" == SMART_SCORE_VERSION
     assert result.score > Decimal("40")
     assert result.confidence >= Decimal("0.70")
     assert result.exclusion_reasons == []
@@ -84,9 +86,10 @@ def test_single_market_windfall_is_penalized() -> None:
         scored_at=datetime(2026, 7, 9, tzinfo=UTC),
     )
 
-    assert result.high_confidence_eligible is False
+    assert result.high_confidence_eligible is True
     assert any(row["reason"] == "single_market_profit_concentration" for row in result.penalty_summary)
-    assert "single_market_pnl_share_lte_30pct" in result.exclusion_reasons
+    assert "single_market_pnl_share_lte_30pct" not in result.hard_gate_status
+    assert result.exclusion_reasons == []
 
 
 def test_positive_clv_losing_wallet_keeps_prediction_quality_signal() -> None:

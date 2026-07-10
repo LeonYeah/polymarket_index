@@ -1,5 +1,8 @@
 # Week06 SmartScore 与统计回测报告
 
+> 本文记录最初的 `smart_score_v1` 验收口径。当前写入版本已升级为
+> `smart_score_v2`；v2 变更见 `docs/smart-score-v2-report.md`，历史 v1 行不会被覆盖。
+
 日期：2026-07-09
 
 ## 范围

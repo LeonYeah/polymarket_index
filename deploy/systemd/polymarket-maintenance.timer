@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Polymarket sampling maintenance every six hours
+Description=Run Polymarket discovery and sampling maintenance every six hours
 
 [Timer]
 OnBootSec=10min

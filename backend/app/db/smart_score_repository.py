@@ -81,6 +81,7 @@ class SmartScoreRepository:
         *,
         run_id: str,
         feature_version: str,
+        source: str,
         as_of: datetime,
         observation_start: datetime,
         wallet_limit: int | None,
@@ -241,7 +242,7 @@ class SmartScoreRepository:
                     COALESCE(fs.avg_followability, 0) AS avg_followability,
                     COALESCE(fs.low_liquidity_trade_share, 1) AS low_liquidity_trade_share,
                     :as_of AS calculated_at,
-                    'smart_score_v1' AS source,
+                    :source AS source,
                     :run_id AS ingestion_run_id
                 FROM candidate_wallets cw
                 LEFT JOIN result_stats rs ON rs.wallet_address = cw.wallet_address
@@ -256,6 +257,7 @@ class SmartScoreRepository:
             {
                 "run_id": run_id,
                 "feature_version": feature_version,
+                "source": source,
                 "as_of": as_of,
                 "as_of_date": as_of.date(),
                 "observation_start": observation_start,
@@ -369,7 +371,7 @@ class SmartScoreRepository:
                         :raw_score, :confidence, :high_confidence_eligible,
                         CAST(:hard_gate_status AS jsonb), CAST(:exclusion_reasons AS jsonb),
                         CAST(:penalty_summary AS jsonb), CAST(:component_summary AS jsonb),
-                        CAST(:weight_config AS jsonb), :scored_at, 'smart_score_v1', :run_id
+                        CAST(:weight_config AS jsonb), :scored_at, :source, :run_id
                     )
                     ON CONFLICT (wallet_address, score_version, scored_at) DO UPDATE SET
                         score = EXCLUDED.score,
@@ -390,6 +392,7 @@ class SmartScoreRepository:
                     "wallet_address": result.wallet_address,
                     "feature_uid": result.feature_uid,
                     "score_version": result.score_version,
+                    "source": result.score_version,
                     "score": result.score,
                     "raw_score": result.raw_score,
                     "confidence": result.confidence,
@@ -459,7 +462,13 @@ class SmartScoreRepository:
         ).scalar_one()
         return int(result)
 
-    def fetch_score_rows_for_backtest(self, *, scored_at: datetime, limit: int | None = None) -> list[dict[str, Any]]:
+    def fetch_score_rows_for_backtest(
+        self,
+        *,
+        scored_at: datetime,
+        score_version: str,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         limit_clause = "LIMIT :limit" if limit is not None else ""
         result = self.connection.execute(
             text(
@@ -476,11 +485,12 @@ class SmartScoreRepository:
                 FROM wallet_scores ws
                 JOIN wallet_features wf ON wf.feature_uid = ws.feature_uid
                 WHERE ws.scored_at = :scored_at
+                    AND ws.score_version = :score_version
                 ORDER BY ws.score DESC, ws.confidence DESC
                 {limit_clause}
                 """
             ),
-            {"scored_at": scored_at, "limit": limit},
+            {"scored_at": scored_at, "score_version": score_version, "limit": limit},
         )
         return [dict(row._mapping) for row in result]
 
@@ -583,7 +593,7 @@ class SmartScoreRepository:
                     :backtest_run_uid, :score_version, :training_start, :training_end,
                     :validation_start, :validation_end, CAST(:strategy_config AS jsonb),
                     CAST(:summary AS jsonb), :status, :started_at, :finished_at,
-                    'smart_score_v1', :run_id
+                    :score_version, :run_id
                 )
                 ON CONFLICT (backtest_run_uid) DO UPDATE SET
                     summary = EXCLUDED.summary,
@@ -614,6 +624,7 @@ class SmartScoreRepository:
         *,
         backtest_run_uid: str,
         run_id: str,
+        score_version: str,
     ) -> int:
         count = 0
         for row in rows:
@@ -633,7 +644,7 @@ class SmartScoreRepository:
                         CAST(:training_features AS jsonb), :future_realized_pnl,
                         :future_net_pnl, :future_capital_deployed, :future_roi,
                         :future_avg_clv_10m, :future_max_drawdown, :selected_at,
-                        'smart_score_v1', :run_id
+                        :score_version, :run_id
                     )
                     ON CONFLICT (result_uid) DO UPDATE SET
                         training_score = EXCLUDED.training_score,
@@ -652,6 +663,7 @@ class SmartScoreRepository:
                     **row,
                     "backtest_run_uid": backtest_run_uid,
                     "run_id": run_id,
+                    "score_version": score_version,
                     "training_features": _json(row.get("training_features", {})),
                 },
             )
@@ -669,7 +681,7 @@ class SmartScoreRepository:
                     )
                     VALUES (
                         :score_uid, :component_name, :component_score, :max_score,
-                        CAST(:details AS jsonb), 'smart_score_v1', :run_id
+                        CAST(:details AS jsonb), :source, :run_id
                     )
                     ON CONFLICT (score_uid, component_name) DO UPDATE SET
                         component_score = EXCLUDED.component_score,
@@ -685,6 +697,7 @@ class SmartScoreRepository:
                     "component_score": component["component_score"],
                     "max_score": component["max_score"],
                     "details": _json(component.get("details", {})),
+                    "source": result.score_version,
                     "run_id": run_id,
                 },
             )

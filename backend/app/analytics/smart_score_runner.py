@@ -68,11 +68,12 @@ def run_smart_score(
     backtest_summary: dict[str, Any] = {}
     with engine.begin() as connection:
         repository = SmartScoreRepository(connection)
-        repository.start_run(run_id, "smart_score_v1", "polymarket", started_at, params)
+        repository.start_run(run_id, SMART_SCORE_VERSION, "polymarket", started_at, params)
         try:
             features = repository.fetch_feature_rows(
                 run_id=run_id,
                 feature_version=FEATURE_VERSION,
+                source=SMART_SCORE_VERSION,
                 as_of=as_of,
                 observation_start=observation_start,
                 wallet_limit=wallet_limit,
@@ -132,7 +133,11 @@ def _run_backtest(
     backtest_run_uid = stable_uid(
         ["backtest", SMART_SCORE_VERSION, training_start, training_end, validation_start, validation_end]
     )
-    score_rows = repository.fetch_score_rows_for_backtest(scored_at=scored_at, limit=wallet_limit)
+    score_rows = repository.fetch_score_rows_for_backtest(
+        scored_at=scored_at,
+        score_version=SMART_SCORE_VERSION,
+        limit=wallet_limit,
+    )
     selections = select_backtest_strategies(score_rows, top_n=strategy_size)
     future = repository.fetch_future_performance(
         wallet_addresses=[selection.wallet_address for selection in selections],
@@ -190,5 +195,6 @@ def _run_backtest(
         result_rows,
         backtest_run_uid=backtest_run_uid,
         run_id=run_id,
+        score_version=SMART_SCORE_VERSION,
     )
     return inserted, summary
