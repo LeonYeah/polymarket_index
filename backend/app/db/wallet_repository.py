@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Connection, text
@@ -550,3 +550,104 @@ class WalletDataRepository:
             {"wallet_address": wallet_address, "limit": limit},
         )
         return [dict(row._mapping) for row in result]
+
+    def fetch_paper_wallets(self, limit: int) -> list[dict[str, Any]]:
+        result = self.connection.execute(
+            text(
+                """
+                WITH latest_scores AS (
+                    SELECT DISTINCT ON (wallet_address)
+                        wallet_address, score, confidence, high_confidence_eligible
+                    FROM wallet_scores
+                    ORDER BY wallet_address, scored_at DESC
+                ), targets AS (
+                    SELECT
+                        w.wallet_address,
+                        (ww.wallet_address IS NOT NULL) AS watchlisted,
+                        COALESCE(ls.score, 0) AS score,
+                        COALESCE(ls.confidence, 0) AS confidence,
+                        COALESCE(ls.high_confidence_eligible, false) AS high_confidence_eligible,
+                        w.last_seen_at
+                    FROM wallets w
+                    LEFT JOIN watchlist_wallets ww
+                        ON ww.wallet_address = w.wallet_address AND ww.status = 'active'
+                    LEFT JOIN latest_scores ls ON ls.wallet_address = w.wallet_address
+                    WHERE ww.wallet_address IS NOT NULL
+                        OR ls.high_confidence_eligible = true
+                        OR (ls.score >= 60 AND ls.confidence >= 0.35)
+                )
+                SELECT * FROM targets
+                ORDER BY watchlisted DESC, high_confidence_eligible DESC,
+                    score DESC, last_seen_at DESC NULLS LAST
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        return [dict(row._mapping) for row in result]
+
+    def fetch_latest_trade_at(self, wallet_address: str) -> datetime | None:
+        return self.connection.execute(
+            text("SELECT max(trade_timestamp) FROM trades WHERE wallet_address = :wallet"),
+            {"wallet": wallet_address},
+        ).scalar_one()
+
+    def fetch_paper_token_ids(
+        self,
+        *,
+        limit: int,
+        recent_hours: int = 168,
+    ) -> list[str]:
+        since = datetime.now(UTC) - timedelta(hours=recent_hours)
+        result = self.connection.execute(
+            text(
+                """
+                WITH latest_scores AS (
+                    SELECT DISTINCT ON (wallet_address)
+                        wallet_address, score, confidence, high_confidence_eligible
+                    FROM wallet_scores
+                    ORDER BY wallet_address, scored_at DESC
+                ), target_wallets AS (
+                    SELECT w.wallet_address
+                    FROM wallets w
+                    LEFT JOIN watchlist_wallets ww
+                        ON ww.wallet_address = w.wallet_address AND ww.status = 'active'
+                    LEFT JOIN latest_scores ls ON ls.wallet_address = w.wallet_address
+                    WHERE ww.wallet_address IS NOT NULL
+                        OR ls.high_confidence_eligible = true
+                        OR (ls.score >= 60 AND ls.confidence >= 0.35)
+                ), candidate_tokens AS (
+                    SELECT mt.token_id, 0 AS priority, m.volume, mt.updated_at
+                    FROM watchlist_markets wm
+                    JOIN markets m ON m.condition_id = wm.condition_id
+                    JOIN market_tokens mt ON mt.condition_id = wm.condition_id
+                    WHERE wm.status = 'active'
+                        AND COALESCE(m.active, true) = true
+                        AND COALESCE(m.closed, false) = false
+                    UNION ALL
+                    SELECT t.token_id, 1 AS priority, m.volume, t.updated_at
+                    FROM trades t
+                    JOIN target_wallets tw ON tw.wallet_address = t.wallet_address
+                    LEFT JOIN markets m ON m.condition_id = t.condition_id
+                    WHERE t.token_id IS NOT NULL
+                        AND t.trade_timestamp >= :since
+                        AND COALESCE(m.closed, false) = false
+                    UNION ALL
+                    SELECT s.token_id, 2 AS priority, m.volume, s.updated_at
+                    FROM signals s
+                    LEFT JOIN markets m ON m.condition_id = s.market_id
+                    WHERE s.processing_status = 'pending'
+                        AND COALESCE(m.closed, false) = false
+                )
+                SELECT token_id
+                FROM candidate_tokens
+                WHERE token_id IS NOT NULL AND token_id <> ''
+                GROUP BY token_id
+                ORDER BY min(priority), max(COALESCE(volume, 0)) DESC,
+                    max(updated_at) DESC
+                LIMIT :limit
+                """
+            ),
+            {"since": since, "limit": limit},
+        )
+        return [str(row.token_id) for row in result]

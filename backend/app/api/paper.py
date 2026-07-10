@@ -35,6 +35,18 @@ def paper_summary() -> dict[str, Any]:
     }
 
 
+@router.get("/health")
+def sampling_health(
+    max_age_seconds: Annotated[int, Query(ge=30, le=86_400)] = 300,
+) -> dict[str, Any]:
+    engine = make_engine()
+    with engine.begin() as connection:
+        health = PaperTradingRepository(connection).fetch_sampling_health(
+            max_age_seconds=max_age_seconds
+        )
+    return jsonable_encoder(health)
+
+
 @router.get("/signals")
 def paper_signals(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,

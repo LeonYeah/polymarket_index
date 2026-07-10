@@ -40,5 +40,11 @@ def test_week07_dashboard_routes_are_registered() -> None:
 
 def test_week08_paper_trading_routes_are_registered() -> None:
     paths = TestClient(create_app()).get("/openapi.json").json()["paths"]
-    for path in ["/paper/summary", "/paper/signals", "/paper/orders", "/paper/run"]:
+    for path in [
+        "/paper/summary",
+        "/paper/health",
+        "/paper/signals",
+        "/paper/orders",
+        "/paper/run",
+    ]:
         assert path in paths

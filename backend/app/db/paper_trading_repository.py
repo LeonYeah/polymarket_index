@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -631,4 +631,68 @@ class PaperTradingRepository:
             "order_status_distribution": {row.status: row.count for row in statuses},
             "reject_distribution": {row.reject_reason: row.count for row in rejects},
             "runtime": dict(runtime._mapping),
+        }
+
+    def fetch_sampling_health(self, *, max_age_seconds: int = 300) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        jobs: dict[str, dict[str, Any] | None] = {}
+        for job_name in [
+            "continuous_sampling_cycle",
+            "wallet_trade_incremental",
+            "price_archive",
+            "paper_trading",
+        ]:
+            row = self.connection.execute(
+                text(
+                    """
+                    SELECT run_id, job_name, status, started_at, finished_at,
+                        counters, error
+                    FROM ingestion_runs
+                    WHERE job_name = :job_name
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"job_name": job_name},
+            ).one_or_none()
+            if row is None:
+                jobs[job_name] = None
+                continue
+            payload = dict(row._mapping)
+            reference_at = payload["finished_at"] or payload["started_at"]
+            payload["age_seconds"] = max(0, int((now - reference_at).total_seconds()))
+            payload["fresh"] = payload["age_seconds"] <= max_age_seconds
+            jobs[job_name] = payload
+        cycle = jobs["continuous_sampling_cycle"]
+        if cycle is None:
+            status = "missing"
+        elif not cycle["fresh"]:
+            status = "stale"
+        elif cycle["status"] == "succeeded":
+            status = "healthy"
+        else:
+            status = "degraded"
+        counts = self.connection.execute(
+            text(
+                """
+                SELECT
+                    (SELECT count(*) FROM signals)::integer AS signals,
+                    (SELECT count(*) FROM paper_orders)::integer AS orders,
+                    (SELECT count(*) FROM paper_positions)::integer AS positions,
+                    (SELECT count(*) FROM paper_pnl)::integer AS pnl_rows,
+                    (SELECT count(*) FROM orderbook_snapshots
+                        WHERE snapshot_at >= now() - interval '1 hour')::integer
+                        AS orderbooks_last_hour,
+                    (SELECT count(*) FROM trades
+                        WHERE updated_at >= now() - interval '1 hour')::integer
+                        AS trades_updated_last_hour
+                """
+            )
+        ).one()
+        return {
+            "status": status,
+            "checked_at": now,
+            "max_age_seconds": max_age_seconds,
+            "jobs": jobs,
+            "counts": dict(counts._mapping),
         }

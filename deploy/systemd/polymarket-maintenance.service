@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh Polymarket market metadata, PnL, and SmartScore
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=polymarket
+Group=polymarket
+WorkingDirectory=/opt/polymarket-wallet-tracker
+EnvironmentFile=/etc/polymarket-wallet-tracker.env
+ExecStart=/opt/polymarket-wallet-tracker/.venv/bin/python -m backend.scripts.run_sampling_maintenance --max-markets 500 --wallet-limit 150
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
