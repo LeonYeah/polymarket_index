@@ -34,7 +34,7 @@ def main() -> None:
             categories="",
             token_verification_limit=50,
         )
-        results["market_ingestion"] = market.__dict__
+        results["market_ingestion"] = _compact_result(market)
     except Exception as exc:  # noqa: BLE001 - later analytics can use the previous snapshot.
         errors["market_ingestion"] = f"{type(exc).__name__}: {exc}"
     try:
@@ -44,7 +44,7 @@ def main() -> None:
             reconciliation_limit=30,
             profile_limit=5,
         )
-        results["pnl"] = pnl.__dict__
+        results["pnl"] = _compact_result(pnl)
     except Exception as exc:  # noqa: BLE001 - scoring may still refresh from prior PnL.
         errors["pnl"] = f"{type(exc).__name__}: {exc}"
     try:
@@ -54,12 +54,22 @@ def main() -> None:
             leaderboard_limit=100,
             run_backtest=False,
         )
-        results["smart_score"] = score.__dict__
+        results["smart_score"] = _compact_result(score)
     except Exception as exc:  # noqa: BLE001 - report all maintenance stages together.
         errors["smart_score"] = f"{type(exc).__name__}: {exc}"
     print(json.dumps({"results": results, "errors": errors}, sort_keys=True, default=str))
     if errors:
         raise SystemExit(1)
+
+
+def _compact_result(result: Any) -> dict[str, Any]:
+    return {
+        "run_id": result.run_id,
+        "status": result.status,
+        "counters": result.counters,
+        "started_at": result.started_at,
+        "finished_at": result.finished_at,
+    }
 
 
 if __name__ == "__main__":
