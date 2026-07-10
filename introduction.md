@@ -1,30 +1,37 @@
-# Polymarket Wallet Tracker - 快速交接
+# Polymarket Wallet Tracker - 项目交接
 
 更新时间：2026-07-10
 
-下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。当前主线可进入 Week08：基于 Week07 的 Dashboard、watchlist 和告警做纸面跟单闭环。
+## 下次会话入口
+
+1. 先读本文件，再读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。
+2. 当前 Week01-Week07 已完成并通过本地 MVP 验收，下一主线是 Week08 纸面跟单系统。
+3. Week08 只生成信号、模拟订单和模拟收益，不连接真实下单，不引入私钥或交易凭证。
+4. Week07 功能基线：`337abd9 完成Week07验收与API契约完善`。开始工作前先执行 `git status`，不要覆盖用户已有修改。
 
 ## 项目目标与边界
 
-建设一个可复现、可审计、可回测的 Polymarket 优质钱包研究系统，用公开只读数据完成钱包发现、市场行为分析、PnL、CLV、SmartScore、回测和后续纸面跟单研究。
+目标：基于 Polymarket 公开数据，建设可复现、可审计、可解释、可回测的钱包研究系统，覆盖市场采集、钱包发现、PnL、CLV、SmartScore、告警和纸面跟单。
 
 硬边界：
 
-- 只做公开只读采集、建模、分析和回测。
-- 不做真实下单，不保存私钥、签名凭证、交易 cookie、交易 API key。
-- USA VPS 只作为公开只读 API 探针/采集节点，不作为真实订单执行节点。
-- 未结算浮盈不得计入 realized PnL；`cashPnl/currentValue` 必须与 `realizedPnl` 分离。
+- 只使用公开只读接口；不保存私钥、签名凭证、交易 cookie 或交易 API key。
+- 当前不做真实下单。USA VPS 仅用于公开 API 探针或采集，不作为执行节点。
+- `realized_pnl` 只包含已结算/已平仓收益；`cashPnl`、`currentValue` 和未结算浮盈必须单独展示。
+- SmartScore、告警和回测都是研究证据，不是收益承诺或交易指令。
 
-## 环境与状态
+## 当前状态
 
 - 本地仓库：`/home/lee/workspace/search/codes`
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
-- Python venv：`/home/lee/workspace/search/codes/.venv`
-- VPS 登录：`ssh usa`
-- 最新阶段：Week01-Week07 已完成工程闭环，最新提交以 `git log --oneline -5` 为准。
-- VPS 状态：`/home/lee/workspace/search/codes` 是空 Git 仓库，目前没有需要提交的代码。
-- 当前验证：`pytest -q` 为 54 passed、1 warning；`ruff check .` 通过；前端用 Linux Node 直接执行 `node node_modules/next/dist/bin/next build` 通过。
-- Week07 实数验收：最新评分钱包 150 个、市场 500 个；Dashboard API 实际返回 100 个钱包和 100 个市场，三个核心查询 p95 均低于 50ms。
+- Python 环境：`/home/lee/workspace/search/codes/.venv`
+- VPS：`ssh usa`；VPS 的 `codes` 仍为空 Git 仓库，无待提交代码。
+- 数据库 schema 已推进到 Week07；PostgreSQL 由 `infra/docker-compose.yml` 管理。
+- 自动化验证：`54 passed`、`ruff check .` 通过、Next.js production build 通过。
+- Week07 验收快照：1,358 个钱包、500 个市场、16,181 条钱包市场结果、150 个最新评分钱包；Dashboard 实际返回 100 个钱包和 100 个市场。
+- 本地 API p95：钱包榜 21.153ms、市场列表 20.239ms、告警列表 17.776ms，均低于 500ms。
+- 告警真实验收：生成 5 条采集延迟告警；完成一条 `open -> ack -> resolved` 流转；钱包和市场 watchlist 各写入一条并产生 2 条审计记录。
+- 当前高置信钱包为 0。主要原因是订单簿、CLV、followability 历史覆盖不足；系统会展示低置信状态和失败门槛，不会把低质量样本包装成高置信结果。
 
 ## 当前架构
 
@@ -32,211 +39,155 @@
 codes/
   backend/
     app/
-      collectors/   Polymarket 只读 API、市场、钱包、价格、订单簿、WebSocket 采集
-      analytics/    PnL 引擎、钱包画像、SmartScore、统计回测
-      db/           PostgreSQL schema、repository、迁移
-      api/          health、wallet、market、score、watchlist、alert 查询接口
+      collectors/   Gamma、Data、CLOB HTTP/WebSocket 只读采集与归一化
+      analytics/    PnL Engine、Feature Engine、SmartScore、统计回测
+      db/           PostgreSQL schema、迁移与各领域 repository
+      api/          wallet、market、score、alert、watchlist 查询接口
       core/         配置、日志、run_id
-    scripts/
-      api_probe.py
-      db_migrate.py
-      ingest_market_data.py
-      backfill_wallet_data.py
-      calculate_pnl.py
-      archive_price_data.py
-      score_wallets.py
-    tests/          schema、采集归一化、钱包回填、PnL、价格归档、SmartScore、Week07 路由
-  docs/             API/采集/PnL/价格归档/SmartScore 报告、数据字典、样例
-  frontend/         Next.js Dashboard、钱包详情、市场详情、告警操作、watchlist 表单
-  infra/            Docker Compose: Postgres、Redis、backend
+    scripts/        迁移、采集、回填、PnL、价格归档、评分、告警、性能验收
+    tests/          数据合同、归一化、分析逻辑、schema 与 API 行为测试
+  frontend/         Next.js Dashboard、钱包详情、市场详情、告警和 watchlist
+  docs/             数据字典、阶段报告、ADR、验收报告和样例
+  infra/            PostgreSQL、Redis、backend 的 Docker Compose 配置
 ```
 
-技术栈：Python、FastAPI、Pydantic、httpx、SQLAlchemy、psycopg、PostgreSQL、Docker Compose。当前未使用 TimescaleDB 特性。
+技术栈：Python、FastAPI、Pydantic、httpx、SQLAlchemy、psycopg、PostgreSQL、Next.js、TypeScript、Docker Compose。Redis 已配置但业务暂未使用；未使用 TimescaleDB 特性。
 
 ## 已完成能力
 
-基础工程：
+### 基础与数据合同
 
-- FastAPI 后端骨架、`/health`、配置系统、结构化日志、run_id。
-- Docker Compose 可启动 Postgres、Redis、backend。
-- `.env.example` 不含私密凭证，已覆盖市场、钱包、价格归档配置。
-- 数据库迁移集中在 `backend/app/db/migrations.py`，当前 schema 到 Week07。
+- FastAPI、配置、结构化日志、run_id、集中式 schema 迁移和 Docker Compose 已完成。
+- 金额、价格、size 使用 `Decimal`；CLOB token id 使用字符串；时间统一为 UTC。
+- 原始 API 响应、标准化实体、ingestion run 和 checkpoint 均可追踪。
 
-只读 API 与市场数据：
+### 市场采集
 
-- 已验证 Gamma、Data、CLOB HTTP 端点和 CLOB market WebSocket。
-- 已实现 Gamma keyset 分页、events/markets/token 映射、OI/live volume/liquidity/holders 入库、raw response 归档。
-- CLOB token id 按字符串处理；金额、价格、size 使用 `Decimal`；时间统一 UTC。
-- 关键报告：`docs/api-probe-report.md`、`docs/market-data-ingestion-report.md`。
+- 已验证 Gamma、Data、CLOB HTTP 和 CLOB market WebSocket。
+- 已实现 events、markets、outcome/token 映射、OI、live volume、liquidity、holders 和 raw response 入库。
+- Gamma 使用 keyset 分页；token/outcome 长度不一致会标记映射失败，不静默猜测。
 
-钱包发现与历史回填：
+### 钱包发现与回填
 
-- 已实现候选钱包发现：leaderboard、market holders、近期 active traders。
-- 已实现交易、当前仓位、已平仓仓位回填；`/trades` 显式使用 `takerOnly=false`。
-- 无官方稳定 trade id 时，用稳定字段生成 `trade_uid` 去重。
-- checkpoint 支持按 wallet/endpoint/takerOnly/offset 续跑；单钱包失败不影响整批。
-- API：`GET /wallets/{wallet_address}/timeline`。
-- 关键报告：`docs/wallet-backfill-report.md`。
+- 候选来源包括 leaderboard、market holders 和近期 active traders。
+- 已回填 trades、current positions、closed positions；`/trades` 使用 `takerOnly=false`。
+- `trade_uid` 可稳定去重；checkpoint 支持按钱包和端点续跑，单钱包失败不会中断整批。
 
-PnL 与钱包画像：
+### PnL 与钱包画像
 
-- 已实现 PnL Engine v1，按 wallet/condition/token/outcome 聚合交易、当前仓位、已平仓仓位。
-- `realized_pnl` 只来自 `wallet_positions_closed.realized_pnl`。
-- `unrealized_pnl` 来自 `wallet_positions_current.cash_pnl`；`current_value` 只做敞口/估值字段。
-- 已生成 `wallet_market_results`、`wallet_daily_equity`、`pnl_reconciliation_checks`。
-- API：`GET /wallets/{wallet_address}/profile?market_limit=50`。
-- CLI：`python -m backend.scripts.calculate_pnl --wallet-limit 100`。
-- 关键报告：`docs/pnl-engine-report.md`。
+- PnL Engine v1 按 wallet/condition/token/outcome 聚合交易和仓位。
+- 已生成 `wallet_market_results`、`wallet_daily_equity` 和 `pnl_reconciliation_checks`。
+- 钱包画像区分 realized PnL、unrealized PnL、current value、ROI、profit factor、drawdown 和市场集中度。
 
-价格、订单簿、CLV 与可跟随性：
+### 价格、订单簿、CLV 与可跟随性
 
-- 已实现 CLOB `prices-history` 回填、`book` 快照归档、market WebSocket 归档、多轮订单簿循环采样。
-- 已拆分 top-of-book、有限档深度、spread、spread bps、top depth、midpoint。
-- WebSocket 事件同时保留系统 `received_at` 和 payload `event_at`。
-- 已实现 signed CLV：`clv_30s`、`clv_2m`、`clv_10m`、`clv_1h`、`clv_24h`。
-- 已实现保守滑点估算、depth/spread 缺陷识别、`market_liquidity_score`。
-- CLI：`python -m backend.scripts.archive_price_data ...`。
-- 关键报告：`docs/price-archive-report.md`。
+- 已实现 `prices-history` 回填、订单簿快照、多轮采样和 WebSocket 事件归档。
+- 已落库 bid/ask、midpoint、spread、spread bps、top depth 和有限档深度。
+- 已实现 signed CLV（30s、2m、10m、1h、24h）、保守滑点估算和 `market_liquidity_score`。
+- WebSocket 同时保存系统 `received_at` 与 payload `event_at`，延迟分析优先使用 `received_at`。
 
-SmartScore 与统计回测：
+### SmartScore 与回测
 
-- 已实现 Feature Engine v1、SmartScore v1、硬门槛、惩罚项、confidence 和组件拆解。
-- 已落库版本化表：`wallet_features`、`wallet_scores`、`wallet_score_components`、`backtest_runs`、`backtest_wallet_results`。
-- 评分组件：收益质量、预测质量、时机优势、稳定性、可跟随性、网络信号占位。
-- 硬门槛：resolved 数、活跃天数、realized notional、ROI、Bayesian win rate、最大回撤、单市场集中度、可跟随性。
-- 回测 v1 比较三类策略：`top_score`、`top_pnl`、`random_active`。
-- API：`GET /scores/leaderboard?limit=50&high_confidence_only=false`。
-- CLI：`python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20 --backtest`。
-- 关键报告：`docs/smart-score-report.md`。
+- Feature Engine v1、SmartScore v1、硬门槛、惩罚项、confidence 和组件拆解均已版本化落库。
+- 评分覆盖收益质量、预测质量、时机优势、稳定性、可跟随性；网络信号当前为中性占位。
+- 回测 v1 比较 `top_score`、`top_pnl`、`random_active` 三类选择策略。
+- 小样本高 ROI、单市场暴利和正 CLV 但短期亏损等关键行为已有测试。
 
-API、Dashboard 与提醒：
+### API、Dashboard、watchlist 与告警
 
-- 已实现 Dashboard API：`GET /wallets/top`、`GET /wallets/{address}`、`GET /wallets/{address}/markets`、`GET /markets`、`GET /markets/{market_id}`、`GET /markets/{market_id}/smart-flow`。
-- 已实现提醒 API：`GET /alerts` 查询告警；`PATCH /alerts/{alert_id}` 支持 open/ack/resolved。
-- 告警查询默认只读；`POST /alerts/generate` 和 `python -m backend.scripts.generate_alerts` 可显式运行规则。
-- 已实现 watchlist API：`POST /watchlist/wallets`、`POST /watchlist/markets`，并记录 `watchlist_audit_log`。
-- 已实现 `GET /scores/backtests/latest` 供 Dashboard 展示最近回测摘要。
-- 已落库 Week07 表：`watchlist_wallets`、`watchlist_markets`、`watchlist_audit_log`、`alert_events`。
-- 告警规则 v1：高分钱包新建仓、多个高分钱包进入同一市场、临近结束大额建仓、spread/深度恶化、数据采集延迟。
-- Next.js Dashboard 首屏展示排行榜、市场监控、告警中心和回测摘要。
-- 钱包详情页展示 score、confidence、realized/unrealized PnL、收益曲线、市场列表、类别分布、CLV 分布、近期交易、hard gate 状态。
-- 市场详情页展示元数据、outcome/token 映射、订单簿、top holders、高分钱包流入和相关告警。
-- 分页响应包含 `total` 和 `has_more`，API 错误使用统一结构；验收报告见 `docs/week07-acceptance-report.md`。
+- Dashboard 提供钱包榜、市场监控、回测摘要和告警中心。
+- 钱包详情包含评分拆解、hard gates、PnL、收益曲线、市场、类别、CLV 和近期交易。
+- 市场详情包含元数据、token 映射、订单簿、holders、smart-flow 和相关告警。
+- API 列表使用统一分页：`limit`、`offset`、`returned`、`total`、`has_more`；金额接口声明 `USDC`，错误使用统一结构。
+- watchlist 支持钱包/市场写入并记录操作者、时间、内容；告警支持 `open/ack/resolved`。
+- 五类告警规则已实现：高分钱包新建仓、多个高分钱包同向进入、临近结束大额建仓、流动性恶化、采集延迟。
+- 告警查询默认只读；规则通过 `POST /alerts/generate`、Dashboard 按钮或 `python -m backend.scripts.generate_alerts` 显式执行。
 
-## 关键口径
+## 未完成与技术债务
 
-- `/trades?takerOnly=false` 是采集口径，不是单笔 maker/taker 角色证据。
-- maker/taker 双侧归因尚未建模。
-- 高活跃钱包可能仍有更深 `/trades` 历史，可从 `wallet_backfill_checkpoints` 续跑。
-- `data/live-volume` 的 `id` 是 Gamma market 数值型 `id`，不是 `condition_id` 或 CLOB token id。
-- token 映射按 `clobTokenIds` 与 `outcomes` 顺序建立；长度不一致标记 `mapping_status=failed`。
-- 不要用最后成交价替代可成交价格；滑点和可跟随性必须优先使用订单簿、spread、depth。
-- `prices-history` 不是历史订单簿，不能据此声称精确模拟滑点。
-- `market_stream_events.received_at` 是延迟估算主时间；payload `event_at` 可能乱序或延迟。
-- SmartScore 是研究指标，不是收益承诺。
+### 当前主线：Week08
 
-## 未完成与债务
+- `signals`、`paper_orders`、`paper_order_events`、`paper_positions`、`paper_pnl` 尚未实现。
+- Signal Engine、加权跟单、同向信号合并、拒单规则、订单簿成交模拟、FOK/FAK/GTC 状态机和延迟分段尚未实现。
+- 纸面收益归因、策略级 ROI/win rate/max drawdown/reject distribution 和 Dashboard 页面尚未实现。
+- Week08 的“连续运行 7 天”和“至少 100 条模拟订单”属于长时间验收；先完成可运行闭环，再持续采样。
 
-当前主线：
+### 数据与分析债务
 
-- Week08 纸面跟单系统尚未实现。
-- Dashboard 目前是本地只读研究工具，尚未做登录认证；MVP 可先本地使用。
-- 告警规则已有独立 CLI 和显式 API，但尚未部署生产调度器；Week08 可按纸面跟单周期调用 CLI。
+- 24 小时 watchlist 订单簿/WebSocket 长跑尚未执行；followability 和 CLV 覆盖不足，是高置信钱包为 0 的主要原因。
+- PnL v1 的 `estimated_slippage` 尚未用已归档订单簿回写。
+- 回测使用当前历史结果做近似时间切分；严格历史重放需要按 cutoff 重建特征、仓位和订单簿快照。
+- SmartScore 网络信号仍为中性占位；资金来源和协同行为等待后续链上索引与钱包聚类。
+- maker/taker 双侧钱包归因尚未建模；`takerOnly=false` 不能证明单笔 maker/taker 角色。
+- 负风险、组合型市场和多 outcome 市场尚未深入建模。
+- Gamma 缺失 category/tag 时当前仅保留并告警，分类来源仍需补强。
+- raw response 已归档，但 market/event/trade/position/holder/orderbook 的细粒度 schema contract 测试仍不足。
+- `outcome_correct` 只有在 closed position 证据充分时才设置；其余保持 null。
+- Daily equity 仍是 UTC 日级而非 tick 级。
+- smart-flow 依赖最新评分和仓位快照，尚无全局 freshness SLA。
 
-数据与分析债务：
+### 产品与生产化债务
 
-- Week05 的 24 小时 watchlist 订单簿/WebSocket 长跑命令已具备，但尚未实际跑满 24 小时。
-- `avg_followability` 依赖订单簿归档覆盖；未归档 token 会被保守评低，可能导致高质量钱包无法进入高置信榜。
-- Week04 PnL 的 `estimated_slippage` 尚未用 Week05 订单簿数据回写。
-- 回测 v1 依赖当前已落库历史结果做近似时间切分；严格历史重放需要更完整的历史状态快照。
-- SmartScore 网络信号仍为中性占位；资金来源、协同行为留到 Week11 链上索引与钱包聚类。
-- maker/taker 双侧钱包归因尚未处理。
-- 负风险、组合型市场、多 outcome 市场仅保留扩展空间，尚未深入建模。
-- Gamma active market 响应缺少稳定 category/tag 时，目前是保留并告警，后续需补全分类来源。
-- raw API response 已归档，但 market、event、trade、position、holder、orderbook 的 schema/contract 测试还不够细。
-- `outcome_correct` 只有在 closed position 的 `cur_price` 证据足够强时才设置，否则保持 null。
-- Daily equity v1 是 UTC 日期级，不是 tick 级净值。
-- market smart-flow 依赖最新 `wallet_scores` 和 `wallet_positions_current`；若评分或仓位未刷新，页面会展示旧快照。
-
-生产化债务：
-
-- 尚未做调度器、任务队列、长期限流策略、监控告警、部署脚本。
+- Dashboard 仅用于本地研究，没有登录和用户权限隔离。
+- 告警已有独立 CLI，但尚未部署定时调度器；也没有任务队列、失败重试编排和运行监控。
+- 尚未完成生产级限流、缓存策略、指标监控、部署脚本和备份恢复流程。
+- Redis 尚未接入；当前数据量下查询无需缓存即可满足 p95，数据放大后需重新评估。
 - VPS 尚未部署正式采集节点。
-- 纸面跟单、风控、人工确认、受控自动执行试运行均未实现。
+- 前端缺少浏览器端 E2E/视觉回归测试；后端测试中的 1 个 warning 来自 TestClient/httpx 第三方弃用提示。
+- 真实执行、风控、人工确认和受控自动执行均未实现；在纸面结果稳定前不得推进真实下单。
 
-## 常用命令
+## 必须遵守的口径
+
+- `data/live-volume.id` 是 Gamma market 数值 id，不是 `condition_id` 或 CLOB token id。
+- token 映射按 `clobTokenIds` 与 `outcomes` 的顺序建立，不允许按文本猜测。
+- `prices-history` 不是历史订单簿；不能用最后成交价声称精确可成交或精确滑点。
+- 滑点和可跟随性优先使用订单簿、spread、depth 和数据新鲜度。
+- 未归档 token 的 followability 必须保守处理；Dashboard 必须继续展示 confidence、failed gates 和原因。
+
+## 最小运行手册
 
 ```bash
 cd /home/lee/workspace/search/codes
 . .venv/bin/activate
 
-# 验证
-pytest -q
+# 基础验证与数据库
 ruff check .
-
-# 数据库
+pytest -q
 docker compose -f infra/docker-compose.yml up -d postgres
 python -m backend.scripts.db_migrate
 
-# 市场采集 smoke
-python -m backend.scripts.ingest_market_data --max-markets 5 --page-limit 5 --holders-market-limit 2 --holders-limit 3
-
-# 钱包回填 smoke
-python -m backend.scripts.backfill_wallet_data --candidate-limit 5 --leaderboard-limit 3 --holder-candidate-limit 3 --active-trader-limit 3 --backfill-wallet-limit 1 --page-limit 2 --max-trade-pages 1
-
-# PnL smoke
+# 核心离线流水线
+python -m backend.scripts.ingest_market_data --max-markets 5 --page-limit 5
+python -m backend.scripts.backfill_wallet_data --candidate-limit 5 --backfill-wallet-limit 1 --max-trade-pages 1
 python -m backend.scripts.calculate_pnl --wallet-limit 5 --profile-limit 2
-
-# 价格、订单簿、CLV
-python -m backend.scripts.archive_price_data --token-limit 100 --skip-orderbook
-python -m backend.scripts.archive_price_data --token-limit 5 --skip-history --orderbook-cycles 3 --orderbook-interval-seconds 2 --depth-limit 5 --websocket --websocket-seconds 10 --websocket-event-limit 10
-python -m backend.scripts.archive_price_data --skip-history --skip-orderbook --calculate-clv --clv-limit 1000
-
-# SmartScore 与回测
-python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20
-python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20 --backtest --strategy-size 10 --validation-days 30
-
-# API
-uvicorn backend.app.main:app --reload
-curl http://127.0.0.1:8000/health
-curl 'http://127.0.0.1:8000/wallets/top?limit=100'
-curl 'http://127.0.0.1:8000/wallets/<wallet_address>/timeline?limit=100'
-curl 'http://127.0.0.1:8000/wallets/<wallet_address>/profile?market_limit=50'
-curl 'http://127.0.0.1:8000/wallets/<wallet_address>?market_limit=50'
-curl 'http://127.0.0.1:8000/scores/leaderboard?limit=50'
-curl 'http://127.0.0.1:8000/markets?limit=100'
-curl 'http://127.0.0.1:8000/markets/<condition_id>'
-curl 'http://127.0.0.1:8000/alerts?limit=50&generate=false'
-curl -X POST 'http://127.0.0.1:8000/alerts/generate'
-
-# 告警生成与 Dashboard 性能验收
+python -m backend.scripts.archive_price_data --token-limit 5 --calculate-clv --clv-limit 1000
+python -m backend.scripts.score_wallets --wallet-limit 150 --leaderboard-limit 100 --backtest
 python -m backend.scripts.generate_alerts
+
+# API 与验收
+uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 python -m backend.scripts.benchmark_dashboard --requests 30 --warmup 3
 
-# 前端
+# 前端；当前环境默认 npm 指向 Windows，使用容器内 Linux Node
 cd frontend
-npm install
 PATH=/home/lee/.vscode-remote-containers/bin/618725e67565b290ba4da6fe2d29f8fa1d4e3622:$PATH \
-  node node_modules/next/dist/bin/next dev
+  NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 \
+  node node_modules/next/dist/bin/next dev -H 127.0.0.1 -p 3000
 ```
 
-24 小时 watchlist 归档形态：
+## 关键文档
 
-```bash
-python -m backend.scripts.archive_price_data \
-  --tokens <comma_separated_watchlist_tokens> \
-  --skip-history \
-  --orderbook-cycles 2880 \
-  --orderbook-interval-seconds 30 \
-  --websocket \
-  --websocket-seconds 86400 \
-  --websocket-event-limit 1000000
-```
+- `docs/data-dictionary.md`：数据库字段和口径。
+- `docs/pnl-engine-report.md`：PnL v1 设计与限制。
+- `docs/price-archive-report.md`：价格、订单簿、CLV、followability。
+- `docs/smart-score-report.md`：SmartScore 和回测。
+- `docs/week07-acceptance-report.md`：API、Dashboard、告警和性能验收。
+- `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`：下一阶段任务与验收标准。
 
-## 下一步建议
+## 下一会话建议顺序
 
-1. 阅读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。
-2. 先把 Week07 告警生成从请求时执行迁移到定时任务或 CLI，作为纸面跟单信号输入。
-3. 纸面跟单只记录模拟订单和模拟持仓，不接入真实下单。
-4. 继续展示 all-ranked、confidence、failed gates 和原因，避免隐藏未通过高置信门槛的钱包。
-5. 若要提升信号质量，先补跑高价值 token 的订单簿/CLV，再扩大 `score_wallets --wallet-limit`。
+1. 为 Week08 新增 schema 和 repository，先定义 signal、paper order、event、position、PnL 的可追踪主键和状态约束。
+2. 实现纯函数 Signal Engine 与 Paper Trading Engine，优先覆盖拒单原因、数据新鲜度、订单簿成交和部分成交测试。
+3. 增加 CLI/runner，将 watchlist、SmartScore、trades、orderbook 串成一次可复现的纸面运行。
+4. 再增加 API 和 Dashboard 页面，最后做 smoke、行为测试和短时连续运行。
+5. 将 7 天连续运行和 100 条模拟订单作为后台长期验收，不阻塞代码闭环，但必须如实记录样本不足。
