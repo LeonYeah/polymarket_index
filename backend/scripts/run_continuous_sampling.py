@@ -28,30 +28,35 @@ def main() -> None:
     engine = make_engine(args.database_url)
     settings = get_settings()
     cycle = 0
-    while True:
-        cycle += 1
-        try:
-            result = run_continuous_sampling_cycle(
-                settings,
-                engine,
-                wallet_limit=args.wallet_limit,
-                trade_page_limit=args.trade_page_limit,
-                trade_max_pages=args.trade_max_pages,
-                token_limit=args.token_limit,
-                token_recent_hours=args.token_recent_hours,
-                paper_lookback_minutes=args.paper_lookback_minutes,
-            )
-            payload: dict[str, Any] = {**result.__dict__, "cycle": cycle}
-        except Exception as exc:  # noqa: BLE001 - systemd loop must survive transient failures.
-            payload = {
-                "cycle": cycle,
-                "status": "failed",
-                "errors": {"cycle": f"{type(exc).__name__}: {exc}"},
-            }
-        print(json.dumps(payload, sort_keys=True, default=str), flush=True)
-        if args.repeat_seconds <= 0 or (args.max_cycles > 0 and cycle >= args.max_cycles):
-            break
-        time.sleep(args.repeat_seconds)
+    try:
+        while True:
+            cycle += 1
+            try:
+                result = run_continuous_sampling_cycle(
+                    settings,
+                    engine,
+                    wallet_limit=args.wallet_limit,
+                    trade_page_limit=args.trade_page_limit,
+                    trade_max_pages=args.trade_max_pages,
+                    token_limit=args.token_limit,
+                    token_recent_hours=args.token_recent_hours,
+                    paper_lookback_minutes=args.paper_lookback_minutes,
+                )
+                payload: dict[str, Any] = {**result.__dict__, "cycle": cycle}
+            except Exception as exc:  # noqa: BLE001 - survive transient stage failures.
+                payload = {
+                    "cycle": cycle,
+                    "status": "failed",
+                    "errors": {"cycle": f"{type(exc).__name__}: {exc}"},
+                }
+            print(json.dumps(payload, sort_keys=True, default=str), flush=True)
+            if args.repeat_seconds <= 0 or (
+                args.max_cycles > 0 and cycle >= args.max_cycles
+            ):
+                break
+            time.sleep(args.repeat_seconds)
+    except KeyboardInterrupt:
+        print(json.dumps({"status": "stopped", "cycle": cycle}), flush=True)
 
 
 if __name__ == "__main__":

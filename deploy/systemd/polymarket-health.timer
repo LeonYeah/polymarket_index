@@ -2,7 +2,7 @@
 Description=Check Polymarket sampling health every five minutes
 
 [Timer]
-OnBootSec=5min
+OnActiveSec=2min
 OnUnitActiveSec=5min
 Persistent=true
 
