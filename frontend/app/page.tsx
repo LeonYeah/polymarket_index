@@ -136,6 +136,7 @@ export default async function DashboardPage() {
                 <h2>Alert center</h2>
               </div>
               <div className="button-row">
+                <Link className="button" href="/paper">Paper trading</Link>
                 <span className="pill warn">{openAlertTotal} open</span>
                 <AlertGenerationButton />
               </div>

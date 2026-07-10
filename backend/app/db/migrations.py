@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_09_week07_dashboard_alerts_schema_v1"
+SCHEMA_VERSION = "2026_07_10_week08_paper_trading_schema_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -799,6 +799,150 @@ CREATE INDEX IF NOT EXISTS alert_events_market_idx
     ON alert_events(condition_id, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS alert_events_wallet_idx
     ON alert_events(wallet_address, last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS signals (
+    signal_id text PRIMARY KEY,
+    source_trade_uid text REFERENCES trades(trade_uid),
+    leader_wallet text NOT NULL REFERENCES wallets(wallet_address),
+    market_id text NOT NULL,
+    token_id text NOT NULL,
+    side text NOT NULL CHECK (side IN ('BUY', 'SELL')),
+    leader_price numeric NOT NULL,
+    leader_size numeric NOT NULL,
+    leader_trade_time timestamptz NOT NULL,
+    detected_at timestamptz NOT NULL,
+    confidence numeric NOT NULL,
+    wallet_weight numeric NOT NULL,
+    reason text NOT NULL,
+    evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+    processing_status text NOT NULL DEFAULT 'pending'
+        CHECK (processing_status IN ('pending', 'merged', 'ordered', 'rejected')),
+    parent_signal_id text REFERENCES signals(signal_id),
+    source text NOT NULL DEFAULT 'signal_engine_v1',
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS signals_source_trade_wallet_idx
+    ON signals(source_trade_uid, leader_wallet) WHERE source_trade_uid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS signals_market_detected_idx
+    ON signals(market_id, token_id, side, detected_at DESC);
+CREATE INDEX IF NOT EXISTS signals_status_idx
+    ON signals(processing_status, detected_at DESC);
+
+CREATE TABLE IF NOT EXISTS paper_orders (
+    order_id text PRIMARY KEY,
+    signal_id text NOT NULL REFERENCES signals(signal_id),
+    strategy_version text NOT NULL,
+    order_type text NOT NULL CHECK (order_type IN ('FOK', 'FAK', 'GTC')),
+    side text NOT NULL CHECK (side IN ('BUY', 'SELL')),
+    market_id text NOT NULL,
+    token_id text NOT NULL,
+    requested_size numeric NOT NULL CHECK (requested_size > 0),
+    requested_notional numeric NOT NULL CHECK (requested_notional >= 0),
+    worst_price numeric NOT NULL,
+    estimated_fill_price numeric,
+    filled_size numeric NOT NULL DEFAULT 0,
+    estimated_slippage numeric NOT NULL DEFAULT 0,
+    estimated_fee numeric NOT NULL DEFAULT 0,
+    status text NOT NULL CHECK (
+        status IN ('created', 'rejected', 'would_fill', 'would_partial_fill', 'expired', 'settled')
+    ),
+    reject_reason text CHECK (
+        reject_reason IS NULL OR reject_reason IN (
+            'insufficient_score', 'low_confidence', 'low_liquidity', 'wide_spread',
+            'stale_data', 'late_signal', 'market_not_accepting_orders',
+            'compliance_block', 'negative_expected_edge'
+        )
+    ),
+    leader_trade_time timestamptz NOT NULL,
+    signal_detected_at timestamptz NOT NULL,
+    decision_at timestamptz NOT NULL,
+    order_simulated_at timestamptz NOT NULL,
+    detection_latency_ms bigint NOT NULL DEFAULT 0,
+    decision_latency_ms bigint NOT NULL DEFAULT 0,
+    simulation_latency_ms bigint NOT NULL DEFAULT 0,
+    orderbook_snapshot_uid text REFERENCES orderbook_snapshots(snapshot_uid),
+    decision_evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL DEFAULT 'paper_trading_engine_v1',
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (signal_id, strategy_version, order_type)
+);
+
+CREATE INDEX IF NOT EXISTS paper_orders_status_idx
+    ON paper_orders(status, order_simulated_at DESC);
+CREATE INDEX IF NOT EXISTS paper_orders_market_idx
+    ON paper_orders(market_id, token_id, order_simulated_at DESC);
+
+CREATE TABLE IF NOT EXISTS paper_order_events (
+    event_id text PRIMARY KEY,
+    order_id text NOT NULL REFERENCES paper_orders(order_id) ON DELETE CASCADE,
+    from_status text,
+    to_status text NOT NULL,
+    event_at timestamptz NOT NULL,
+    reason text,
+    details jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL DEFAULT 'paper_trading_engine_v1',
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS paper_order_events_order_time_idx
+    ON paper_order_events(order_id, event_at);
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+    position_id text PRIMARY KEY,
+    strategy_version text NOT NULL,
+    market_id text NOT NULL,
+    token_id text NOT NULL,
+    side text NOT NULL CHECK (side IN ('BUY', 'SELL')),
+    size numeric NOT NULL,
+    average_entry_price numeric NOT NULL,
+    cost_basis numeric NOT NULL,
+    accumulated_fee numeric NOT NULL DEFAULT 0,
+    status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'settled')),
+    opened_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    settled_at timestamptz,
+    source text NOT NULL DEFAULT 'paper_trading_engine_v1',
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (strategy_version, market_id, token_id, side)
+);
+
+CREATE INDEX IF NOT EXISTS paper_positions_status_idx
+    ON paper_positions(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS paper_pnl (
+    pnl_id text PRIMARY KEY,
+    order_id text NOT NULL REFERENCES paper_orders(order_id) ON DELETE CASCADE,
+    strategy_version text NOT NULL,
+    market_id text NOT NULL,
+    token_id text NOT NULL,
+    valuation_type text NOT NULL CHECK (valuation_type IN ('mark_to_market', 'settled')),
+    entry_price numeric NOT NULL,
+    exit_price numeric NOT NULL,
+    filled_size numeric NOT NULL,
+    gross_pnl numeric NOT NULL,
+    fee numeric NOT NULL,
+    slippage_cost numeric NOT NULL,
+    net_pnl numeric NOT NULL,
+    direction_correct boolean,
+    profitable_after_costs boolean NOT NULL,
+    valued_at timestamptz NOT NULL,
+    attribution jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source text NOT NULL DEFAULT 'paper_pnl_v1',
+    ingestion_run_id text NOT NULL REFERENCES ingestion_runs(run_id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (order_id, valuation_type, valued_at)
+);
+
+CREATE INDEX IF NOT EXISTS paper_pnl_strategy_time_idx
+    ON paper_pnl(strategy_version, valued_at DESC);
 """
 
 

@@ -5,6 +5,7 @@ from backend.app.api.alerts import router as alerts_router
 from backend.app.api.errors import register_error_handlers
 from backend.app.api.health import router as health_router
 from backend.app.api.markets import router as markets_router
+from backend.app.api.paper import router as paper_router
 from backend.app.api.scores import router as scores_router
 from backend.app.api.watchlist import router as watchlist_router
 from backend.app.api.wallets import router as wallets_router
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(wallets_router)
     app.include_router(scores_router)
     app.include_router(markets_router)
+    app.include_router(paper_router)
     app.include_router(alerts_router)
     app.include_router(watchlist_router)
     return app

@@ -5,8 +5,8 @@
 ## 下次会话入口
 
 1. 先读本文件，再读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。
-2. 当前 Week01-Week07 已完成并通过本地 MVP 验收，下一主线是 Week08 纸面跟单系统。
-3. Week08 只生成信号、模拟订单和模拟收益，不连接真实下单，不引入私钥或交易凭证。
+2. 当前 Week01-Week08 代码闭环已完成；Week08 的 7 天连续运行仍在等待长期采样验收。
+3. 纸面系统只生成信号、模拟订单和模拟收益，不连接真实下单，不引入私钥或交易凭证。
 4. Week07 功能基线：`337abd9 完成Week07验收与API契约完善`。开始工作前先执行 `git status`，不要覆盖用户已有修改。
 
 ## 项目目标与边界
@@ -26,11 +26,12 @@
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
 - Python 环境：`/home/lee/workspace/search/codes/.venv`
 - VPS：`ssh usa`；VPS 的 `codes` 仍为空 Git 仓库，无待提交代码。
-- 数据库 schema 已推进到 Week07；PostgreSQL 由 `infra/docker-compose.yml` 管理。
-- 自动化验证：`54 passed`、`ruff check .` 通过、Next.js production build 通过。
+- 数据库 schema 已推进到 Week08；PostgreSQL 由 `infra/docker-compose.yml` 管理。
+- 自动化验证：`75 passed`、`ruff check .` 通过、Next.js production build 通过。
 - Week07 验收快照：1,358 个钱包、500 个市场、16,181 条钱包市场结果、150 个最新评分钱包；Dashboard 实际返回 100 个钱包和 100 个市场。
 - 本地 API p95：钱包榜 21.153ms、市场列表 20.239ms、告警列表 17.776ms，均低于 500ms。
 - 告警真实验收：生成 5 条采集延迟告警；完成一条 `open -> ack -> resolved` 流转；钱包和市场 watchlist 各写入一条并产生 2 条审计记录。
+- Week08 真实 smoke：1 个成功周期、100 个 signal、100 个模拟订单；当前样本全部因 confidence 0.2008 低于 0.35 被拒绝，未虚构成交和收益。
 - 当前高置信钱包为 0。主要原因是订单簿、CLV、followability 历史覆盖不足；系统会展示低置信状态和失败门槛，不会把低质量样本包装成高置信结果。
 
 ## 当前架构
@@ -41,8 +42,9 @@ codes/
     app/
       collectors/   Gamma、Data、CLOB HTTP/WebSocket 只读采集与归一化
       analytics/    PnL Engine、Feature Engine、SmartScore、统计回测
+                    Signal Engine、Paper Trading Engine、纸面 PnL
       db/           PostgreSQL schema、迁移与各领域 repository
-      api/          wallet、market、score、alert、watchlist 查询接口
+      api/          wallet、market、score、alert、watchlist、paper 接口
       core/         配置、日志、run_id
     scripts/        迁移、采集、回填、PnL、价格归档、评分、告警、性能验收
     tests/          数据合同、归一化、分析逻辑、schema 与 API 行为测试
@@ -103,14 +105,21 @@ codes/
 - 五类告警规则已实现：高分钱包新建仓、多个高分钱包同向进入、临近结束大额建仓、流动性恶化、采集延迟。
 - 告警查询默认只读；规则通过 `POST /alerts/generate`、Dashboard 按钮或 `python -m backend.scripts.generate_alerts` 显式执行。
 
+### 纸面跟单
+
+- 五张 Week08 表覆盖 signal、订单、事件、仓位与 PnL，原始交易、合并信号、决策和最终归因可串联追踪。
+- 加权跟单综合 SmartScore、类别代理、稳定性和 followability；同市场同 token 同方向信号可合并。
+- 风险门槛覆盖低样本/分数、置信度、流动性、spread、新鲜度、延迟、市场状态、合规和预期优势。
+- FOK/FAK/GTC 使用有限档订单簿模拟全量、部分、等待和过期状态，不默认成交。
+- `/paper` 页面展示策略摘要、状态/拒单分布、订单和 signal；CLI 支持单次或受监督的重复运行。
+
 ## 未完成与技术债务
 
-### 当前主线：Week08
+### 当前主线：Week08 长期采样
 
-- `signals`、`paper_orders`、`paper_order_events`、`paper_positions`、`paper_pnl` 尚未实现。
-- Signal Engine、加权跟单、同向信号合并、拒单规则、订单簿成交模拟、FOK/FAK/GTC 状态机和延迟分段尚未实现。
-- 纸面收益归因、策略级 ROI/win rate/max drawdown/reject distribution 和 Dashboard 页面尚未实现。
-- Week08 的“连续运行 7 天”和“至少 100 条模拟订单”属于长时间验收；先完成可运行闭环，再持续采样。
+- Week08 已达到 100 条模拟订单，但均为历史扫描且因低置信被拒绝；尚无实时可成交和 PnL 样本。
+- “连续运行 7 天”尚未完成，不能进入 Week09 真实执行。
+- 需要持续归档 watchlist token 订单簿并周期运行纸面 CLI，再验收 net ROI、win rate、max drawdown 和失败恢复。
 
 ### 数据与分析债务
 
@@ -163,6 +172,7 @@ python -m backend.scripts.calculate_pnl --wallet-limit 5 --profile-limit 2
 python -m backend.scripts.archive_price_data --token-limit 5 --calculate-clv --clv-limit 1000
 python -m backend.scripts.score_wallets --wallet-limit 150 --leaderboard-limit 100 --backtest
 python -m backend.scripts.generate_alerts
+python -m backend.scripts.run_paper_trading --lookback-minutes 60 --order-type FAK
 
 # API 与验收
 uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
@@ -182,12 +192,13 @@ PATH=/home/lee/.vscode-remote-containers/bin/618725e67565b290ba4da6fe2d29f8fa1d4
 - `docs/price-archive-report.md`：价格、订单簿、CLV、followability。
 - `docs/smart-score-report.md`：SmartScore 和回测。
 - `docs/week07-acceptance-report.md`：API、Dashboard、告警和性能验收。
-- `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`：下一阶段任务与验收标准。
+- `docs/week08-acceptance-report.md`：纸面系统代码、真实 smoke、样本与长期验收状态。
+- `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`：本阶段任务与验收标准。
 
 ## 下一会话建议顺序
 
-1. 为 Week08 新增 schema 和 repository，先定义 signal、paper order、event、position、PnL 的可追踪主键和状态约束。
-2. 实现纯函数 Signal Engine 与 Paper Trading Engine，优先覆盖拒单原因、数据新鲜度、订单簿成交和部分成交测试。
-3. 增加 CLI/runner，将 watchlist、SmartScore、trades、orderbook 串成一次可复现的纸面运行。
-4. 再增加 API 和 Dashboard 页面，最后做 smoke、行为测试和短时连续运行。
-5. 将 7 天连续运行和 100 条模拟订单作为后台长期验收，不阻塞代码闭环，但必须如实记录样本不足。
+1. 由进程监督器每分钟运行纸面周期，保留至少 7 天运行记录，不需要人工修复失败周期。
+2. 同步持续归档 watchlist token 的订单簿和 WebSocket，避免所有信号停在 stale/low-liquidity 门槛。
+3. 每日检查 `/paper` 的成交、拒单和延迟分布；没有实时成交样本时不得解释 ROI。
+4. 为 category expertise 建立独立钱包分类特征，并校准市场费用模型。
+5. 只有纸面结果在 2-4 周内稳定，才讨论 Week09；目前不得接入私钥或真实订单。

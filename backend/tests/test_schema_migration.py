@@ -105,3 +105,41 @@ def test_schema_records_alert_lifecycle_and_watchlist_audit() -> None:
     assert "resolved_at timestamptz" in SCHEMA_SQL
     assert "target_type text NOT NULL" in SCHEMA_SQL
     assert "operator text NOT NULL DEFAULT 'local'" in SCHEMA_SQL
+
+
+def test_schema_contains_week08_paper_trading_tables() -> None:
+    for table_name in [
+        "signals",
+        "paper_orders",
+        "paper_order_events",
+        "paper_positions",
+        "paper_pnl",
+    ]:
+        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in SCHEMA_SQL
+
+
+def test_schema_records_paper_lifecycle_latency_and_reject_reasons() -> None:
+    for status in [
+        "created",
+        "rejected",
+        "would_fill",
+        "would_partial_fill",
+        "expired",
+        "settled",
+    ]:
+        assert f"'{status}'" in SCHEMA_SQL
+    for reason in [
+        "insufficient_score",
+        "low_confidence",
+        "low_liquidity",
+        "wide_spread",
+        "stale_data",
+        "late_signal",
+        "market_not_accepting_orders",
+        "compliance_block",
+        "negative_expected_edge",
+    ]:
+        assert f"'{reason}'" in SCHEMA_SQL
+    assert "detection_latency_ms bigint" in SCHEMA_SQL
+    assert "decision_latency_ms bigint" in SCHEMA_SQL
+    assert "simulation_latency_ms bigint" in SCHEMA_SQL

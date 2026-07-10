@@ -1,12 +1,12 @@
 # Polymarket Wallet Tracker
 
 Read-only Polymarket wallet research system covering market ingestion, wallet backfill,
-PnL reconciliation, and price/order book archiving.
+PnL reconciliation, price/order book archiving, SmartScore, alerts, and paper copy-trading.
 
 ## Layout
 
 - `backend/`: FastAPI service, configuration, API probe, collectors, analytics, and CLIs.
-- `frontend/`: Next.js dashboard placeholder.
+- `frontend/`: Next.js research dashboard, wallet/market detail, alerts, and paper trading.
 - `infra/`: local Docker Compose for Postgres, Redis, and backend.
 - `docs/`: ADRs, data dictionary, API probe report, and sanitized samples.
 
@@ -48,6 +48,25 @@ SmartScore ranking and statistical backtest after Week06 schema migration:
 python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20
 python -m backend.scripts.score_wallets --wallet-limit 100 --leaderboard-limit 20 --backtest --strategy-size 10 --validation-days 30
 curl 'http://127.0.0.1:8000/scores/leaderboard?limit=50'
+```
+
+Paper copy-trading after Week08 schema migration:
+
+```bash
+python -m backend.scripts.db_migrate
+python -m backend.scripts.run_paper_trading --lookback-minutes 60 --order-type FAK
+curl 'http://127.0.0.1:8000/paper/summary'
+curl 'http://127.0.0.1:8000/paper/orders?limit=100'
+```
+
+For continuous sampling, run under a process supervisor. The loop records each cycle independently
+and never sends a real order:
+
+```bash
+python -m backend.scripts.run_paper_trading \
+  --lookback-minutes 10 \
+  --repeat-seconds 60 \
+  --max-cycles 0
 ```
 
 For a 24-hour watchlist archive, run with explicit watchlist tokens:

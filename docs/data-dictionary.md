@@ -230,3 +230,50 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `future_net_pnl` | decimal | `wallet_market_results` | Future-window net PnL for the selected wallet. |
 | `future_roi` | decimal | Derived | Future net PnL divided by future capital deployed. |
 | `future_avg_clv_10m` | decimal | `trade_clv_metrics` | Future-window average 10-minute CLV where available. |
+
+## Paper Trading Signal
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `signal_id` | string | Derived | Stable hash of engine version, source trade, and leader wallet; merged signals hash all child IDs. |
+| `source_trade_uid` | string | `trades` | Original public trade row; null only for an aligned multi-wallet merged signal. |
+| `leader_wallet` | string | `trades` | Wallet that produced the trade; merged signals retain all leaders in evidence. |
+| `market_id/token_id` | string | `trades` | Condition and outcome token mapping used for book lookup. |
+| `leader_price/leader_size` | decimal | `trades` | Observed leader fill, not the assumed follower fill. |
+| `leader_trade_time/detected_at` | timestamp | Source/Internal | UTC timestamps used for detection latency. |
+| `confidence` | decimal | `wallet_scores` | Latest wallet confidence; low confidence remains rejectable even for watchlists. |
+| `wallet_weight` | decimal | Derived | 0-1 weighted combination of SmartScore, category proxy, stability, and followability. |
+| `reason` | enum | Derived | `high_score_wallet_trade`, `watchlist_wallet_trade`, or `aligned_wallet_signals_merged`. |
+| `processing_status` | enum | Internal | `pending`, `merged`, `ordered`, or `rejected`. |
+| `parent_signal_id` | string | Derived | Merged parent signal, preserving child-to-parent auditability. |
+
+## Paper Order and Lifecycle
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `order_type` | enum | Strategy | `FOK`, `FAK`, or `GTC`; simulation only. |
+| `status` | enum | Engine | `created`, `rejected`, `would_fill`, `would_partial_fill`, `expired`, or `settled`. |
+| `requested_size/notional` | decimal | Derived | Weight-scaled request, bounded by strategy min/max notional. |
+| `worst_price` | decimal | Derived | Limit used while walking archived book levels. |
+| `estimated_fill_price/filled_size` | decimal | Order book | Size-weighted simulated result; never defaults to full fill. |
+| `estimated_slippage` | decimal | Derived | Side-aware difference between midpoint/reference and simulated average fill. |
+| `estimated_fee` | decimal | Derived | Filled notional times the versioned fee assumption. |
+| `reject_reason` | enum | Risk gates | One of the nine Week08 reasons; never free-form for a rejected order. |
+| `detection_latency_ms` | integer | Derived | Leader trade time to signal detection. |
+| `decision_latency_ms` | integer | Derived | Signal detection to strategy decision. |
+| `simulation_latency_ms` | integer | Derived | Strategy decision to book simulation completion. |
+| `paper_order_events` | lifecycle | Internal | Append-only transition evidence including create/reject/fill, GTC expiry, and settlement. |
+
+## Paper Position and PnL
+
+| Field | Type | Source | Notes |
+|---|---|---|---|
+| `paper_positions.average_entry_price` | decimal | Paper fills | Size-weighted entry price for a strategy/market/token/side. |
+| `paper_positions.cost_basis` | decimal | Derived | Simulated fill price times size; fees remain separate. |
+| `valuation_type` | enum | Derived | `mark_to_market` from latest midpoint or `settled` from final outcome. |
+| `gross_pnl` | decimal | Derived | Side-aware exit minus entry value before costs. |
+| `fee` | decimal | Paper order | Estimated transaction fee assigned to the order. |
+| `slippage_cost` | decimal | Derived | Absolute paper entry versus observed leader price, times filled size. |
+| `net_pnl` | decimal | Derived | Gross PnL minus estimated fee; slippage is already embedded in paper entry. |
+| `direction_correct` | boolean | Derived | Whether price/outcome moved in the leader's direction. |
+| `profitable_after_costs` | boolean | Derived | Whether net PnL is positive; kept separate from direction correctness. |

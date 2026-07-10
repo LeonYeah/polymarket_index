@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.api import alerts as alerts_api
 from backend.app.api import markets as markets_api
+from backend.app.api import paper as paper_api
 from backend.app.api import wallets as wallets_api
 from backend.app.main import create_app
 from backend.scripts.benchmark_dashboard import percentile
@@ -137,3 +138,43 @@ def test_api_errors_have_one_shape() -> None:
 def test_benchmark_percentile_uses_nearest_rank() -> None:
     assert percentile([1, 2, 3, 4, 5], 0.95) == 5
     assert percentile([1, 2, 3, 4, 5], 0.50) == 3
+
+
+def test_paper_api_exposes_summary_and_traceable_pagination(monkeypatch: Any) -> None:
+    class Repository:
+        def __init__(self, _connection: object) -> None:
+            pass
+
+        def fetch_summary(self) -> dict[str, object]:
+            return {
+                "strategy": {"net_roi": Decimal("0.01")},
+                "order_status_distribution": {"rejected": 2},
+                "reject_distribution": {"stale_data": 2},
+                "runtime": {"run_count": 1},
+            }
+
+        def fetch_signals(self, **_kwargs: object) -> list[dict[str, object]]:
+            return [{"signal_id": "signal-1", "reason": "watchlist_wallet_trade"}]
+
+        def count_signals(self) -> int:
+            return 101
+
+        def fetch_orders(self, **_kwargs: object) -> list[dict[str, object]]:
+            return [{"order_id": "order-1", "reject_reason": "stale_data"}]
+
+        def count_orders(self) -> int:
+            return 100
+
+    monkeypatch.setattr(paper_api, "make_engine", lambda: _Engine())
+    monkeypatch.setattr(paper_api, "PaperTradingRepository", Repository)
+    client = TestClient(create_app())
+
+    summary = client.get("/paper/summary").json()
+    assert summary["amount_units"] == "USDC"
+    assert summary["summary"]["reject_distribution"] == {"stale_data": 2}
+    signals = client.get("/paper/signals?limit=1&offset=100").json()
+    assert signals["pagination"]["has_more"] is False
+    assert signals["signals"][0]["reason"] == "watchlist_wallet_trade"
+    orders = client.get("/paper/orders?limit=1").json()
+    assert orders["pagination"]["total"] == 100
+    assert orders["orders"][0]["reject_reason"] == "stale_data"
