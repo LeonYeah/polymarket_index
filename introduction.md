@@ -7,7 +7,7 @@
 1. 先读本文件，再读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。
 2. 当前 Week01-Week08 代码闭环已完成；Week08 的 7 天连续运行仍在等待长期采样验收。
 3. 纸面系统只生成信号、模拟订单和模拟收益，不连接真实下单，不引入私钥或交易凭证。
-4. Week08 代码基线：`a147503 实现Week08纸面跟单闭环`。开始工作前先执行 `git status`，不要覆盖用户已有修改。
+4. 连续采样已迁移到 `ssh usa`；最终代码基线见本文件更新提交。开始工作前先执行本地与 VPS `git status`。
 
 ## 项目目标与边界
 
@@ -25,13 +25,14 @@
 - 本地仓库：`/home/lee/workspace/search/codes`
 - 周计划：`/home/lee/workspace/search/polymarket-wallet-tracker-plan`
 - Python 环境：`/home/lee/workspace/search/codes/.venv`
-- VPS：`ssh usa`；VPS 的 `codes` 仍为空 Git 仓库，无待提交代码。
+- VPS：`ssh usa`；代码位于 `/opt/polymarket-wallet-tracker`，原生 PostgreSQL、API、sampler 与 systemd timers 已运行。
 - 数据库 schema 已推进到 Week08；PostgreSQL 由 `infra/docker-compose.yml` 管理。
 - 自动化验证：`75 passed`、`ruff check .` 通过、Next.js production build 通过。
 - Week07 验收快照：1,358 个钱包、500 个市场、16,181 条钱包市场结果、150 个最新评分钱包；Dashboard 实际返回 100 个钱包和 100 个市场。
 - 本地 API p95：钱包榜 21.153ms、市场列表 20.239ms、告警列表 17.776ms，均低于 500ms。
 - 告警真实验收：生成 5 条采集延迟告警；完成一条 `open -> ack -> resolved` 流转；钱包和市场 watchlist 各写入一条并产生 2 条审计记录。
 - Week08 真实 smoke：1 个成功周期、100 个 signal、100 个模拟订单；当前样本全部因 confidence 0.2008 低于 0.35 被拒绝，未虚构成交和收益。
+- VPS 连续采样从 `2026-07-10 04:01:49 UTC` 起计时；每分钟增量交易、相关订单簿和 paper cycle，最近稳定周期 23/23 个订单簿成功。
 - 当前高置信钱包为 0。主要原因是订单簿、CLV、followability 历史覆盖不足；系统会展示低置信状态和失败门槛，不会把低质量样本包装成高置信结果。
 
 ## 当前架构
@@ -118,7 +119,7 @@ codes/
 ### 当前主线：Week08 长期采样
 
 - Week08 已达到 100 条模拟订单，但均为历史扫描且因低置信被拒绝；尚无实时可成交和 PnL 样本。
-- “连续运行 7 天”尚未完成，不能进入 Week09 真实执行。
+- “连续运行 7 天”已在 VPS 开始，最早于 `2026-07-17 04:01:49 UTC` 后验收；此前不能进入 Week09 真实执行。
 - 需要持续归档 watchlist token 订单簿并周期运行纸面 CLI，再验收 net ROI、win rate、max drawdown 和失败恢复。
 
 ### 数据与分析债务
@@ -193,12 +194,13 @@ PATH=/home/lee/.vscode-remote-containers/bin/618725e67565b290ba4da6fe2d29f8fa1d4
 - `docs/smart-score-report.md`：SmartScore 和回测。
 - `docs/week07-acceptance-report.md`：API、Dashboard、告警和性能验收。
 - `docs/week08-acceptance-report.md`：纸面系统代码、真实 smoke、样本与长期验收状态。
+- `docs/vps-sampling-runbook.md`：VPS 原生 PostgreSQL、systemd、健康检查、备份和 SSH 隧道手册。
 - `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`：本阶段任务与验收标准。
 
 ## 下一会话建议顺序
 
-1. 由进程监督器每分钟运行纸面周期，保留至少 7 天运行记录，不需要人工修复失败周期。
-2. 同步持续归档 watchlist token 的订单簿和 WebSocket，避免所有信号停在 stale/low-liquidity 门槛。
+1. 每日检查 VPS `/paper/health` 与 systemd failed units，保留至少 7 天运行记录。
+2. 持续归档目标 token 订单簿；失效 token 会冷却 15 分钟后自动重试。
 3. 每日检查 `/paper` 的成交、拒单和延迟分布；没有实时成交样本时不得解释 ROI。
 4. 为 category expertise 建立独立钱包分类特征，并校准市场费用模型。
 5. 只有纸面结果在 2-4 周内稳定，才讨论 Week09；目前不得接入私钥或真实订单。
