@@ -28,8 +28,15 @@ def top_wallets(
             offset=offset,
             high_confidence_only=high_confidence_only,
         )
+        total = repository.count_top_wallets(high_confidence_only=high_confidence_only)
     return {
-        "pagination": {"limit": limit, "offset": offset, "returned": len(rows)},
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
         "high_confidence_only": high_confidence_only,
         "amount_units": "USDC",
         "wallets": jsonable_encoder(rows),
@@ -75,9 +82,16 @@ def wallet_markets(
             limit=limit,
             offset=offset,
         )
+        total = repository.count_wallet_markets(wallet_address=normalized_wallet)
     return {
         "wallet_address": normalized_wallet,
-        "pagination": {"limit": limit, "offset": offset, "returned": len(rows)},
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
         "amount_units": "USDC",
         "markets": jsonable_encoder(rows),
     }
@@ -96,6 +110,7 @@ def wallet_timeline(
     return {
         "wallet_address": normalized_wallet,
         "limit": limit,
+        "amount_units": "USDC",
         "trades": jsonable_encoder(trades),
     }
 
@@ -113,6 +128,7 @@ def wallet_profile(
         results = repository.fetch_wallet_results(normalized_wallet, market_limit)
     return {
         "wallet_address": normalized_wallet,
+        "amount_units": "USDC",
         "profile": jsonable_encoder(profile or {}),
         "market_limit": market_limit,
         "market_results": jsonable_encoder(results),

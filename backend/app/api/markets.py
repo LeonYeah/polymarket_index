@@ -20,8 +20,15 @@ def markets(
     with engine.begin() as connection:
         repository = DashboardRepository(connection)
         rows = repository.fetch_markets(limit=limit, offset=offset)
+        total = repository.count_markets()
     return {
-        "pagination": {"limit": limit, "offset": offset, "returned": len(rows)},
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
         "amount_units": "USDC",
         "markets": jsonable_encoder(rows),
     }
@@ -46,14 +53,26 @@ def market_detail(market_id: str) -> dict[str, Any]:
 def market_smart_flow(
     market_id: str,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     engine = make_engine()
     with engine.begin() as connection:
         repository = DashboardRepository(connection)
-        rows = repository.fetch_market_smart_flow(market_id=market_id, limit=limit)
+        rows = repository.fetch_market_smart_flow(
+            market_id=market_id,
+            limit=limit,
+            offset=offset,
+        )
+        total = repository.count_market_smart_flow(market_id=market_id)
     return {
         "market_id": market_id,
-        "pagination": {"limit": limit, "offset": 0, "returned": len(rows)},
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
         "amount_units": "USDC",
         "smart_flow": jsonable_encoder(rows),
     }

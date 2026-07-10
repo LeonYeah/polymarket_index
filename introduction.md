@@ -1,6 +1,6 @@
 # Polymarket Wallet Tracker - 快速交接
 
-更新时间：2026-07-09
+更新时间：2026-07-10
 
 下次新会话先读本文件，再读 `../polymarket-wallet-tracker-plan/Week08-纸面跟单系统.md`。当前主线可进入 Week08：基于 Week07 的 Dashboard、watchlist 和告警做纸面跟单闭环。
 
@@ -23,7 +23,8 @@
 - VPS 登录：`ssh usa`
 - 最新阶段：Week01-Week07 已完成工程闭环，最新提交以 `git log --oneline -5` 为准。
 - VPS 状态：`/home/lee/workspace/search/codes` 是空 Git 仓库，目前没有需要提交的代码。
-- 当前验证：`pytest -q` 为 49 passed、1 warning；`ruff check .` 通过；前端用 Linux Node 直接执行 `node node_modules/next/dist/bin/next build` 通过。
+- 当前验证：`pytest -q` 为 54 passed、1 warning；`ruff check .` 通过；前端用 Linux Node 直接执行 `node node_modules/next/dist/bin/next build` 通过。
+- Week07 实数验收：最新评分钱包 150 个、市场 500 个；Dashboard API 实际返回 100 个钱包和 100 个市场，三个核心查询 p95 均低于 50ms。
 
 ## 当前架构
 
@@ -111,7 +112,8 @@ SmartScore 与统计回测：
 API、Dashboard 与提醒：
 
 - 已实现 Dashboard API：`GET /wallets/top`、`GET /wallets/{address}`、`GET /wallets/{address}/markets`、`GET /markets`、`GET /markets/{market_id}`、`GET /markets/{market_id}/smart-flow`。
-- 已实现提醒 API：`GET /alerts` 请求时可生成告警；`PATCH /alerts/{alert_id}` 支持 open/ack/resolved。
+- 已实现提醒 API：`GET /alerts` 查询告警；`PATCH /alerts/{alert_id}` 支持 open/ack/resolved。
+- 告警查询默认只读；`POST /alerts/generate` 和 `python -m backend.scripts.generate_alerts` 可显式运行规则。
 - 已实现 watchlist API：`POST /watchlist/wallets`、`POST /watchlist/markets`，并记录 `watchlist_audit_log`。
 - 已实现 `GET /scores/backtests/latest` 供 Dashboard 展示最近回测摘要。
 - 已落库 Week07 表：`watchlist_wallets`、`watchlist_markets`、`watchlist_audit_log`、`alert_events`。
@@ -119,6 +121,7 @@ API、Dashboard 与提醒：
 - Next.js Dashboard 首屏展示排行榜、市场监控、告警中心和回测摘要。
 - 钱包详情页展示 score、confidence、realized/unrealized PnL、收益曲线、市场列表、类别分布、CLV 分布、近期交易、hard gate 状态。
 - 市场详情页展示元数据、outcome/token 映射、订单簿、top holders、高分钱包流入和相关告警。
+- 分页响应包含 `total` 和 `has_more`，API 错误使用统一结构；验收报告见 `docs/week07-acceptance-report.md`。
 
 ## 关键口径
 
@@ -138,8 +141,7 @@ API、Dashboard 与提醒：
 
 - Week08 纸面跟单系统尚未实现。
 - Dashboard 目前是本地只读研究工具，尚未做登录认证；MVP 可先本地使用。
-- 告警规则使用当前已落库数据在 `GET /alerts?generate=true` 请求时生成/upsert，尚未接入调度器。
-- API p95 尚未在真实本地大数据量下压测；当前完成合同测试和静态构建验证。
+- 告警规则已有独立 CLI 和显式 API，但尚未部署生产调度器；Week08 可按纸面跟单周期调用 CLI。
 
 数据与分析债务：
 
@@ -204,7 +206,12 @@ curl 'http://127.0.0.1:8000/wallets/<wallet_address>?market_limit=50'
 curl 'http://127.0.0.1:8000/scores/leaderboard?limit=50'
 curl 'http://127.0.0.1:8000/markets?limit=100'
 curl 'http://127.0.0.1:8000/markets/<condition_id>'
-curl 'http://127.0.0.1:8000/alerts?limit=50&generate=true'
+curl 'http://127.0.0.1:8000/alerts?limit=50&generate=false'
+curl -X POST 'http://127.0.0.1:8000/alerts/generate'
+
+# 告警生成与 Dashboard 性能验收
+python -m backend.scripts.generate_alerts
+python -m backend.scripts.benchmark_dashboard --requests 30 --warmup 3
 
 # 前端
 cd frontend

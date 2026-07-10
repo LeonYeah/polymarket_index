@@ -407,7 +407,9 @@ class SmartScoreRepository:
             count += 1
         return count
 
-    def fetch_leaderboard(self, *, limit: int, high_confidence_only: bool = False) -> list[dict[str, Any]]:
+    def fetch_leaderboard(
+        self, *, limit: int, offset: int = 0, high_confidence_only: bool = False
+    ) -> list[dict[str, Any]]:
         high_confidence_clause = "AND ws.high_confidence_eligible = true" if high_confidence_only else ""
         result = self.connection.execute(
             text(
@@ -436,12 +438,26 @@ class SmartScoreRepository:
                 )
                 {high_confidence_clause}
                 ORDER BY ws.score DESC, ws.confidence DESC, wf.realized_pnl_180d DESC
-                LIMIT :limit
+                LIMIT :limit OFFSET :offset
                 """
             ),
-            {"limit": limit},
+            {"limit": limit, "offset": offset},
         )
         return [dict(row._mapping) for row in result]
+
+    def count_leaderboard(self, *, high_confidence_only: bool = False) -> int:
+        high_confidence_clause = "AND high_confidence_eligible = true" if high_confidence_only else ""
+        result = self.connection.execute(
+            text(
+                f"""
+                SELECT count(*)::integer
+                FROM wallet_scores
+                WHERE scored_at = (SELECT max(scored_at) FROM wallet_scores)
+                {high_confidence_clause}
+                """
+            )
+        ).scalar_one()
+        return int(result)
 
     def fetch_score_rows_for_backtest(self, *, scored_at: datetime, limit: int | None = None) -> list[dict[str, Any]]:
         limit_clause = "LIMIT :limit" if limit is not None else ""

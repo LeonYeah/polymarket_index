@@ -15,6 +15,7 @@ router = APIRouter(prefix="/scores", tags=["scores"])
 @router.get("/leaderboard")
 def score_leaderboard(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     high_confidence_only: bool = False,
 ) -> dict[str, Any]:
     engine = make_engine()
@@ -22,11 +23,20 @@ def score_leaderboard(
         repository = SmartScoreRepository(connection)
         rows = repository.fetch_leaderboard(
             limit=limit,
+            offset=offset,
             high_confidence_only=high_confidence_only,
         )
+        total = repository.count_leaderboard(high_confidence_only=high_confidence_only)
     return {
-        "limit": limit,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
         "high_confidence_only": high_confidence_only,
+        "amount_units": "USDC",
         "leaderboard": jsonable_encoder(rows),
     }
 
@@ -37,4 +47,4 @@ def latest_backtest_summary() -> dict[str, Any]:
     with engine.begin() as connection:
         repository = DashboardRepository(connection)
         row = repository.fetch_latest_backtest_summary()
-    return {"backtest": jsonable_encoder(row or {})}
+    return {"amount_units": "USDC", "backtest": jsonable_encoder(row or {})}

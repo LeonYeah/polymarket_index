@@ -60,6 +60,20 @@ class DashboardRepository:
         )
         return [dict(row._mapping) for row in result]
 
+    def count_top_wallets(self, *, high_confidence_only: bool = False) -> int:
+        high_confidence_clause = "AND high_confidence_eligible = true" if high_confidence_only else ""
+        result = self.connection.execute(
+            text(
+                f"""
+                SELECT count(*)::integer
+                FROM wallet_scores
+                WHERE scored_at = (SELECT max(scored_at) FROM wallet_scores)
+                {high_confidence_clause}
+                """
+            )
+        ).scalar_one()
+        return int(result)
+
     def fetch_wallet_detail(
         self, *, wallet_address: str, market_limit: int = 50, trade_limit: int = 50
     ) -> dict[str, Any]:
@@ -117,6 +131,13 @@ class DashboardRepository:
             {"wallet_address": wallet_address, "limit": limit, "offset": offset},
         )
         return [dict(row._mapping) for row in result]
+
+    def count_wallet_markets(self, *, wallet_address: str) -> int:
+        result = self.connection.execute(
+            text("SELECT count(*)::integer FROM wallet_market_results WHERE wallet_address = :wallet_address"),
+            {"wallet_address": wallet_address},
+        ).scalar_one()
+        return int(result)
 
     def fetch_market_detail(self, *, market_id: str) -> dict[str, Any] | None:
         market = self.connection.execute(
@@ -225,11 +246,49 @@ class DashboardRepository:
         )
         return [dict(row._mapping) for row in result]
 
-    def fetch_market_smart_flow(self, *, market_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    def count_markets(self) -> int:
+        return int(self.connection.execute(text("SELECT count(*)::integer FROM markets")).scalar_one())
+
+    def fetch_market_smart_flow(
+        self, *, market_id: str, limit: int = 50, offset: int = 0
+    ) -> list[dict[str, Any]]:
         condition_id = self._resolve_condition_id(market_id)
         if condition_id is None:
             return []
-        return self._fetch_market_smart_positions(condition_id, limit)
+        return self._fetch_market_smart_positions(condition_id, limit, offset)
+
+    def count_market_smart_flow(self, *, market_id: str) -> int:
+        condition_id = self._resolve_condition_id(market_id)
+        if condition_id is None:
+            return 0
+        result = self.connection.execute(
+            text(
+                """
+                WITH latest_scores AS (
+                    SELECT *
+                    FROM wallet_scores
+                    WHERE scored_at = (SELECT max(scored_at) FROM wallet_scores)
+                ),
+                flow AS (
+                    SELECT wallet_address, token_id
+                    FROM wallet_positions_current
+                    WHERE condition_id = :condition_id
+                    UNION ALL
+                    SELECT wallet_address, token_id
+                    FROM trades
+                    WHERE condition_id = :condition_id
+                        AND trade_timestamp >= now() - interval '7 days'
+                    GROUP BY wallet_address, token_id
+                )
+                SELECT count(*)::integer
+                FROM flow
+                JOIN latest_scores ws ON ws.wallet_address = flow.wallet_address
+                WHERE ws.high_confidence_eligible = true OR ws.score >= 70
+                """
+            ),
+            {"condition_id": condition_id},
+        ).scalar_one()
+        return int(result)
 
     def fetch_latest_backtest_summary(self) -> dict[str, Any] | None:
         result = self.connection.execute(
@@ -383,6 +442,31 @@ class DashboardRepository:
             params,
         )
         return [dict(row._mapping) for row in result]
+
+    def count_alerts(
+        self,
+        *,
+        status: str | None,
+        condition_id: str | None = None,
+        wallet_address: str | None = None,
+    ) -> int:
+        clauses = []
+        params: dict[str, Any] = {}
+        if status:
+            clauses.append("status = :status")
+            params["status"] = status
+        if condition_id:
+            clauses.append("condition_id = :condition_id")
+            params["condition_id"] = condition_id
+        if wallet_address:
+            clauses.append("wallet_address = :wallet_address")
+            params["wallet_address"] = wallet_address.lower()
+        where_clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+        result = self.connection.execute(
+            text(f"SELECT count(*)::integer FROM alert_events {where_clause}"),
+            params,
+        ).scalar_one()
+        return int(result)
 
     def update_alert_status(self, *, alert_id: str, status: str, operator: str = "local") -> dict[str, Any] | None:
         if status not in {"open", "ack", "resolved"}:
@@ -685,7 +769,9 @@ class DashboardRepository:
         )
         return [dict(row._mapping) for row in result]
 
-    def _fetch_market_smart_positions(self, condition_id: str, limit: int) -> list[dict[str, Any]]:
+    def _fetch_market_smart_positions(
+        self, condition_id: str, limit: int, offset: int = 0
+    ) -> list[dict[str, Any]]:
         result = self.connection.execute(
             text(
                 """
@@ -755,10 +841,10 @@ class DashboardRepository:
                 JOIN latest_scores ws ON ws.wallet_address = flow.wallet_address
                 WHERE ws.high_confidence_eligible = true OR ws.score >= 70
                 ORDER BY ws.score DESC, COALESCE(flow.current_value, flow.recent_notional, 0) DESC
-                LIMIT :limit
+                LIMIT :limit OFFSET :offset
                 """
             ),
-            {"condition_id": condition_id, "limit": limit},
+            {"condition_id": condition_id, "limit": limit, "offset": offset},
         )
         return [dict(row._mapping) for row in result]
 

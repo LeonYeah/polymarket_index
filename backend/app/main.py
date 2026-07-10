@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.alerts import router as alerts_router
+from backend.app.api.errors import register_error_handlers
 from backend.app.api.health import router as health_router
 from backend.app.api.markets import router as markets_router
 from backend.app.api.scores import router as scores_router
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
         allow_headers=["*"],
     )
+    register_error_handlers(app)
     app.include_router(health_router)
     app.include_router(wallets_router)
     app.include_router(scores_router)

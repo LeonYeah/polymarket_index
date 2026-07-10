@@ -23,7 +23,7 @@ def alerts(
     status: Literal["open", "ack", "resolved"] | None = "open",
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-    generate: bool = True,
+    generate: bool = False,
     condition_id: str | None = None,
     wallet_address: str | None = None,
 ) -> dict[str, Any]:
@@ -41,12 +41,32 @@ def alerts(
             condition_id=condition_id,
             wallet_address=normalized_wallet,
         )
+        total = repository.count_alerts(
+            status=status,
+            condition_id=condition_id,
+            wallet_address=normalized_wallet,
+        )
     return {
-        "pagination": {"limit": limit, "offset": offset, "returned": len(rows)},
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
         "status": status,
         "generated": generation,
+        "amount_units": "USDC",
         "alerts": jsonable_encoder(rows),
     }
+
+
+@router.post("/generate")
+def generate_alerts() -> dict[str, Any]:
+    engine = make_engine()
+    with engine.begin() as connection:
+        counters = DashboardRepository(connection).generate_alerts()
+    return {"generated": counters, "generated_total": sum(counters.values())}
 
 
 @router.patch("/{alert_id}")
@@ -61,4 +81,4 @@ def update_alert(alert_id: str, payload: AlertStatusUpdate) -> dict[str, Any]:
         )
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "alert_not_found"})
-    return {"alert": jsonable_encoder(row)}
+    return {"amount_units": "USDC", "alert": jsonable_encoder(row)}

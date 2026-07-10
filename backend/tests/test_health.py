@@ -29,6 +29,7 @@ def test_week07_dashboard_routes_are_registered() -> None:
         "/markets/{market_id}",
         "/markets/{market_id}/smart-flow",
         "/alerts",
+        "/alerts/generate",
         "/alerts/{alert_id}",
         "/watchlist/wallets",
         "/watchlist/markets",

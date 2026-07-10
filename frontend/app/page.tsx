@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AlertGenerationButton } from "@/components/AlertGenerationButton";
 import { AlertActions } from "@/components/AlertActions";
 import { decimal, getJson, isoDate, money, pct, shortId } from "@/lib/api";
 
@@ -17,7 +18,7 @@ type MarketsResponse = {
 
 type AlertsResponse = {
   alerts: Row[];
-  generated: Record<string, number>;
+  pagination: { returned: number; total: number };
 };
 
 type BacktestResponse = {
@@ -28,7 +29,7 @@ export default async function DashboardPage() {
   const [walletsResult, marketsResult, alertsResult, backtestResult] = await Promise.all([
     getJson<WalletsResponse>("/wallets/top?limit=100&high_confidence_only=false"),
     getJson<MarketsResponse>("/markets?limit=100"),
-    getJson<AlertsResponse>("/alerts?limit=50&status=open&generate=true"),
+    getJson<AlertsResponse>("/alerts?limit=50&status=open&generate=false"),
     getJson<BacktestResponse>("/scores/backtests/latest"),
   ]);
 
@@ -38,10 +39,7 @@ export default async function DashboardPage() {
   const backtest = backtestResult.data?.backtest ?? {};
   const eligible = wallets.filter((wallet) => wallet.high_confidence_eligible).length;
   const smartFlowMarkets = markets.filter((market) => Number(market.smart_wallet_count ?? 0) > 0).length;
-  const totalGenerated = Object.values(alertsResult.data?.generated ?? {}).reduce(
-    (sum, value) => sum + Number(value ?? 0),
-    0,
-  );
+  const openAlertTotal = alertsResult.data?.pagination.total ?? alerts.length;
 
   return (
     <main className="shell">
@@ -65,7 +63,7 @@ export default async function DashboardPage() {
         <div className="metric-grid">
           <Metric label="Wallets" value={wallets.length} note={`${eligible} high confidence`} />
           <Metric label="Markets" value={markets.length} note={`${smartFlowMarkets} with smart flow`} />
-          <Metric label="Open Alerts" value={alerts.length} note={`${totalGenerated} generated`} />
+          <Metric label="Open Alerts" value={openAlertTotal} note={`${alerts.length} loaded`} />
           <Metric
             label="Backtest"
             value={Object.keys(backtest).length ? String(backtest.status ?? "ready") : "none"}
@@ -137,7 +135,10 @@ export default async function DashboardPage() {
                 <div className="eyebrow">Alerts</div>
                 <h2>Alert center</h2>
               </div>
-              <span className="pill warn">{alerts.length} open</span>
+              <div className="button-row">
+                <span className="pill warn">{openAlertTotal} open</span>
+                <AlertGenerationButton />
+              </div>
             </div>
             {alertsResult.error ? <div className="error">{alertsResult.error}</div> : null}
             {alerts.length ? (
