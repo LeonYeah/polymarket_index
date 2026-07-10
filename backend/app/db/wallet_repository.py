@@ -638,13 +638,35 @@ class WalletDataRepository:
                     LEFT JOIN markets m ON m.condition_id = s.market_id
                     WHERE s.processing_status = 'pending'
                         AND COALESCE(m.closed, false) = false
+                ), ranked_tokens AS (
+                    SELECT
+                        token_id,
+                        min(priority) AS priority,
+                        max(COALESCE(volume, 0)) AS volume,
+                        max(updated_at) AS updated_at
+                    FROM candidate_tokens
+                    WHERE token_id IS NOT NULL AND token_id <> ''
+                    GROUP BY token_id
                 )
-                SELECT token_id
-                FROM candidate_tokens
-                WHERE token_id IS NOT NULL AND token_id <> ''
-                GROUP BY token_id
-                ORDER BY min(priority), max(COALESCE(volume, 0)) DESC,
-                    max(updated_at) DESC
+                SELECT rt.token_id
+                FROM ranked_tokens rt
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM raw_api_responses failed
+                    WHERE failed.endpoint = '/book'
+                        AND failed.request_params ->> 'token_id' = rt.token_id
+                        AND failed.status_code >= 400
+                        AND failed.captured_at >= now() - interval '15 minutes'
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM raw_api_responses recovered
+                            WHERE recovered.endpoint = '/book'
+                                AND recovered.request_params ->> 'token_id' = rt.token_id
+                                AND recovered.status_code < 400
+                                AND recovered.captured_at > failed.captured_at
+                        )
+                )
+                ORDER BY rt.priority, rt.volume DESC, rt.updated_at DESC
                 LIMIT :limit
                 """
             ),
