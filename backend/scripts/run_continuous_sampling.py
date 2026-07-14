@@ -16,7 +16,12 @@ def main() -> None:
     )
     parser.add_argument("--repeat-seconds", type=int, default=60)
     parser.add_argument("--max-cycles", type=int, default=1, help="0 repeats until interrupted.")
-    parser.add_argument("--wallet-limit", type=int, default=50)
+    parser.add_argument(
+        "--research-wallet-limit",
+        type=int,
+        default=25,
+        help="Top-ranked candidate wallets to collect in addition to strict paper wallets.",
+    )
     parser.add_argument("--trade-page-limit", type=int, default=100)
     parser.add_argument("--trade-max-pages", type=int, default=2)
     parser.add_argument("--token-limit", type=int, default=30)
@@ -35,7 +40,7 @@ def main() -> None:
                 result = run_continuous_sampling_cycle(
                     settings,
                     engine,
-                    wallet_limit=args.wallet_limit,
+                    research_wallet_limit=args.research_wallet_limit,
                     trade_page_limit=args.trade_page_limit,
                     trade_max_pages=args.trade_max_pages,
                     token_limit=args.token_limit,

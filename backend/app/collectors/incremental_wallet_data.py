@@ -32,10 +32,12 @@ class IncrementalWalletResult:
 
 
 class IncrementalWalletCollector:
-    """Poll the newest trade pages for paper-eligible wallets.
+    """Poll newest trade pages for the research sampling and strict paper pools.
 
     Historical backfill checkpoints intentionally move toward older pages. This collector always
     starts at offset zero so a completed historical checkpoint cannot hide newly published trades.
+    Research-pool membership only expands read-only collection; paper eligibility is checked later
+    by the independent signal and risk-gate queries.
     """
 
     def __init__(self, settings: Settings, engine: Engine) -> None:
@@ -45,7 +47,7 @@ class IncrementalWalletCollector:
     async def run(
         self,
         *,
-        wallet_limit: int = 50,
+        research_wallet_limit: int = 25,
         page_limit: int = 100,
         max_pages: int = 2,
     ) -> IncrementalWalletResult:
@@ -58,10 +60,12 @@ class IncrementalWalletCollector:
             "new_trade_rows": 0,
             "raw_responses": 0,
             "failed_wallets": 0,
+            "research_wallets": 0,
+            "paper_eligible_wallets": 0,
         }
         warnings: list[str] = []
         params = {
-            "wallet_limit": wallet_limit,
+            "research_wallet_limit": research_wallet_limit,
             "page_limit": page_limit,
             "max_pages": max_pages,
             "offset_policy": "always_start_at_zero",
@@ -77,10 +81,16 @@ class IncrementalWalletCollector:
                 params,
             )
             try:
-                wallets = repository.fetch_paper_wallets(wallet_limit)
+                wallets = repository.fetch_sampling_wallets(research_wallet_limit)
                 counters["target_wallets"] = len(wallets)
+                counters["research_wallets"] = sum(
+                    1 for row in wallets if row.get("research_sampled")
+                )
+                counters["paper_eligible_wallets"] = sum(
+                    1 for row in wallets if row.get("paper_eligible")
+                )
                 if not wallets:
-                    warnings.append("no_paper_wallets")
+                    warnings.append("no_sampling_wallets")
                 async with httpx.AsyncClient(
                     timeout=self.settings.api_probe_timeout_seconds
                 ) as client:

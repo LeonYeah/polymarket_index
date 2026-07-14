@@ -95,7 +95,7 @@ def test_continuous_cycle_keeps_paper_running_when_price_stage_degrades(
         def __init__(self, _connection: object) -> None:
             pass
 
-        def fetch_paper_token_ids(self, **_kwargs: object) -> list[str]:
+        def fetch_sampling_token_ids(self, **_kwargs: object) -> list[str]:
             return ["token-1"]
 
     class Result:

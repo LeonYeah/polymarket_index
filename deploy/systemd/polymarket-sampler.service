@@ -1,5 +1,5 @@
 [Unit]
-Description=Polymarket continuous paper sampling
+Description=Polymarket continuous research and paper sampling
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=polymarket
 Group=polymarket
 WorkingDirectory=/opt/polymarket-wallet-tracker
 EnvironmentFile=/etc/polymarket-wallet-tracker.env
-ExecStart=/opt/polymarket-wallet-tracker/.venv/bin/python -m backend.scripts.run_continuous_sampling --repeat-seconds 60 --max-cycles 0 --wallet-limit 50 --trade-page-limit 100 --trade-max-pages 2 --token-limit 30 --paper-lookback-minutes 120
+ExecStart=/opt/polymarket-wallet-tracker/.venv/bin/python -m backend.scripts.run_continuous_sampling --repeat-seconds 60 --max-cycles 0 --research-wallet-limit 25 --trade-page-limit 100 --trade-max-pages 2 --token-limit 30 --paper-lookback-minutes 120
 Restart=always
 RestartSec=10
 TimeoutStopSec=30

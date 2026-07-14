@@ -28,7 +28,7 @@ def run_continuous_sampling_cycle(
     settings: Settings,
     engine: Engine,
     *,
-    wallet_limit: int = 50,
+    research_wallet_limit: int = 25,
     trade_page_limit: int = 100,
     trade_max_pages: int = 2,
     token_limit: int = 30,
@@ -38,7 +38,7 @@ def run_continuous_sampling_cycle(
     run_id = new_run_id("sampling")
     started_at = datetime.now(UTC)
     params = {
-        "wallet_limit": wallet_limit,
+        "research_wallet_limit": research_wallet_limit,
         "trade_page_limit": trade_page_limit,
         "trade_max_pages": trade_max_pages,
         "token_limit": token_limit,
@@ -53,7 +53,7 @@ def run_continuous_sampling_cycle(
         wallet_result = run_incremental_wallet_sync(
             settings,
             engine,
-            wallet_limit=wallet_limit,
+            research_wallet_limit=research_wallet_limit,
             page_limit=trade_page_limit,
             max_pages=trade_max_pages,
         )
@@ -65,9 +65,10 @@ def run_continuous_sampling_cycle(
 
     try:
         with engine.begin() as connection:
-            tokens = WalletDataRepository(connection).fetch_paper_token_ids(
+            tokens = WalletDataRepository(connection).fetch_sampling_token_ids(
                 limit=token_limit,
                 recent_hours=token_recent_hours,
+                research_wallet_limit=research_wallet_limit,
             )
         counters["target_tokens"] = len(tokens)
         if tokens:

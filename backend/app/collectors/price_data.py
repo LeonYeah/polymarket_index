@@ -476,6 +476,7 @@ class PriceArchiveIngestion:
         websocket_event_limit: int | None = None,
         clv_limit: int | None = None,
         clv_reference_delay_seconds: int | None = None,
+        clv_wallet_addresses: list[str] | None = None,
         followability_size: Decimal | None = None,
         followability_max_spread_bps: Decimal | None = None,
     ) -> PriceArchiveResult:
@@ -545,6 +546,7 @@ class PriceArchiveIngestion:
             "websocket_event_limit": websocket_event_limit,
             "clv_limit": clv_limit,
             "clv_reference_delay_seconds": clv_reference_delay_seconds,
+            "clv_wallet_addresses": clv_wallet_addresses,
             "followability_size": followability_size,
             "followability_max_spread_bps": followability_max_spread_bps,
         }
@@ -558,7 +560,9 @@ class PriceArchiveIngestion:
                     target_tokens = repository.fetch_archive_token_ids(token_limit)
                 target_tokens = target_tokens[:token_limit]
                 counters["tokens"] = len(target_tokens)
-                if not target_tokens:
+                if not target_tokens and (
+                    include_price_history or include_orderbook or include_websocket
+                ):
                     warnings.append("no_target_tokens_found")
 
                 async with httpx.AsyncClient(timeout=self.settings.api_probe_timeout_seconds) as client:
@@ -603,6 +607,7 @@ class PriceArchiveIngestion:
                         run_id,
                         clv_limit,
                         clv_reference_delay_seconds,
+                        clv_wallet_addresses,
                     )
                     counters["clv_metrics"] += inserted["clv_metrics"]
                     counters["clv_missing_reference"] += inserted["clv_missing_reference"]
@@ -732,11 +737,12 @@ class PriceArchiveIngestion:
         run_id: str,
         limit: int,
         reference_delay_seconds: int,
+        wallet_addresses: list[str] | None,
     ) -> dict[str, int]:
         calculated_at = utc_now()
         rows = []
         missing_reference = 0
-        for trade in repository.fetch_trades_for_clv(limit):
+        for trade in repository.fetch_trades_for_clv(limit, wallet_addresses):
             metric = self._build_trade_clv_metric(
                 repository=repository,
                 trade=trade,

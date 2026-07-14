@@ -17,8 +17,8 @@
 | 单元 | 类型 | 用途 |
 |---|---|---|
 | `polymarket-api.service` | 常驻 | 本地回环 FastAPI。 |
-| `polymarket-sampler.service` | 常驻 | 每分钟执行增量交易、相关订单簿和 paper cycle。 |
-| `polymarket-maintenance.timer` | 6 小时 | 刷新市场、发现候选钱包、受限回填、PnL 和 SmartScore。 |
+| `polymarket-sampler.service` | 常驻 | 每分钟采集 Top 25 研究钱包与严格 paper 钱包的增量交易和相关订单簿，再执行 paper cycle。 |
+| `polymarket-maintenance.timer` | 6 小时 | 刷新市场、发现候选钱包、受限回填、CLV、PnL 和 SmartScore。 |
 | `polymarket-health.timer` | 5 分钟 | 检查连续周期是否在 300 秒 freshness SLA 内。 |
 | `polymarket-backup.timer` | 每日 | PostgreSQL custom dump，保留 14 天。 |
 
@@ -50,10 +50,13 @@ ssh -N -L 8001:127.0.0.1:8000 usa
 另一个终端启动本地前端：
 
 ```bash
-cd /home/lee/workspace/search/codes/frontend
-PATH=/home/lee/.vscode-remote-containers/bin/618725e67565b290ba4da6fe2d29f8fa1d4e3622:$PATH \
+cd /home/lee/workspace/search/codes
+eval "$(fnm env --shell bash)"
+fnm use
+cd frontend
+API_BASE_URL=http://127.0.0.1:8001 \
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001 \
-node node_modules/next/dist/bin/next dev -H 127.0.0.1 -p 3000
+npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
 随后访问 `http://127.0.0.1:3000/paper`。不要把 VPS 的 8000 或 5432 端口开放到公网。
@@ -67,18 +70,24 @@ node node_modules/next/dist/bin/next dev -H 127.0.0.1 -p 3000
 每个钱包最多读取 2 页交易，再刷新 current/closed positions。候选发现失败不会阻止后续
 PnL 和 SmartScore 使用上一份可用快照继续刷新。
 
-这条维护链路用于扩充候选池；每分钟 sampler 仍只轮询 watchlist、已通过高置信门槛或达到
-分数/置信度阈值的钱包，避免对整个候选池进行高频重采集。
+这条维护链路用于扩充候选池。每分钟 sampler 将数据采样池与允许纸面成交的钱包池分开：
+
+- 数据采样池包含按最新 SmartScore、confidence 和活跃时间排序的 Top 25 候选钱包，并与严格
+  paper 钱包取并集；入选仅代表读取公开交易和相关订单簿，不授予模拟成交资格。
+- 严格 paper 钱包仍必须是 active watchlist、通过高置信硬门槛，或同时达到 score 60 与
+  confidence 0.35；Signal/Paper Engine 会独立重放这些条件和全部风险门槛。
+- maintenance 每 6 小时补算最多 1000 条尚未计算或已有成熟新时间窗的 CLV，再刷新
+  SmartScore，使研究采样证据可以推动钱包进入或退出严格池。
 
 连续周期按以下顺序运行：
 
-1. 对 watchlist 和合格高分钱包始终从 Data API `/trades` offset 0 拉取最新页，避免历史 backfill exhausted checkpoint 漏掉新交易。
-2. 从 watchlist 市场、目标钱包近期交易和 pending signal 选择相关 token。
+1. 对 Top 25 研究钱包和严格 paper 钱包始终从 Data API `/trades` offset 0 拉取最新页，避免历史 backfill exhausted checkpoint 漏掉新交易。
+2. 从 watchlist 市场、两个钱包池的近期交易和 pending signal 选择相关 token。
 3. 对 token 采集当前 CLOB `/book`，计算有限档深度与 followability。
 4. 运行 FAK paper cycle，记录 signal、拒单/模拟成交、延迟、仓位和 PnL。
 5. CLOB 失败 token 冷却 15 分钟后自动重试，避免每分钟重复请求已失效 book。
 
-最后一次部署重启后，连续验收起点为 `2026-07-10 04:01:49 UTC`。在至少运行至 `2026-07-17 04:01:49 UTC` 且 freshness、失败周期和数据质量复核通过前，不宣称完成 7 天验收。
+最后一次部署重启后，连续验收起点为 `2026-07-14 06:55:11 UTC`。在至少运行至 `2026-07-21 06:55:11 UTC` 且 freshness、失败周期和数据质量复核通过前，不宣称完成 7 天验收。
 
 ## 备份与恢复
 

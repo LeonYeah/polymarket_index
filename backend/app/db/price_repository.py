@@ -329,7 +329,12 @@ class PriceArchiveRepository:
             count += 1
         return count
 
-    def fetch_trades_for_clv(self, limit: int) -> list[dict[str, Any]]:
+    def fetch_trades_for_clv(
+        self,
+        limit: int,
+        wallet_addresses: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        restrict_wallets = wallet_addresses is not None
         result = self.connection.execute(
             text(
                 """
@@ -348,12 +353,32 @@ class PriceArchiveRepository:
                     AND t.trade_timestamp IS NOT NULL
                     AND t.price IS NOT NULL
                     AND t.side IS NOT NULL
-                    AND existing.trade_uid IS NULL
-                ORDER BY t.trade_timestamp DESC
+                    AND (
+                        NOT :restrict_wallets
+                        OR t.wallet_address = ANY(:wallet_addresses)
+                    )
+                    AND (
+                        existing.trade_uid IS NULL
+                        OR (existing.clv_30s IS NULL
+                            AND t.trade_timestamp <= now() - interval '30 seconds')
+                        OR (existing.clv_2m IS NULL
+                            AND t.trade_timestamp <= now() - interval '2 minutes')
+                        OR (existing.clv_10m IS NULL
+                            AND t.trade_timestamp <= now() - interval '10 minutes')
+                        OR (existing.clv_1h IS NULL
+                            AND t.trade_timestamp <= now() - interval '1 hour')
+                        OR (existing.clv_24h IS NULL
+                            AND t.trade_timestamp <= now() - interval '24 hours')
+                    )
+                ORDER BY (existing.trade_uid IS NULL) DESC, t.trade_timestamp DESC
                 LIMIT :limit
                 """
             ),
-            {"limit": limit},
+            {
+                "limit": limit,
+                "restrict_wallets": restrict_wallets,
+                "wallet_addresses": wallet_addresses or [],
+            },
         )
         return [dict(row._mapping) for row in result]
 

@@ -552,6 +552,7 @@ class WalletDataRepository:
         return [dict(row._mapping) for row in result]
 
     def fetch_paper_wallets(self, limit: int) -> list[dict[str, Any]]:
+        """Return wallets allowed to enter the strict paper-decision pipeline."""
         result = self.connection.execute(
             text(
                 """
@@ -583,6 +584,100 @@ class WalletDataRepository:
                 """
             ),
             {"limit": limit},
+        )
+        return [dict(row._mapping) for row in result]
+
+    def fetch_sampling_wallets(self, research_limit: int = 25) -> list[dict[str, Any]]:
+        """Return strict paper wallets plus the highest-ranked research candidates.
+
+        Research candidates are collected to improve CLV and followability coverage, but the
+        paper signal query independently reapplies the strict eligibility gates. Membership in
+        this sampling pool therefore never grants permission to simulate a fill.
+        """
+        result = self.connection.execute(
+            text(
+                """
+                WITH latest_scores AS (
+                    SELECT DISTINCT ON (wallet_address)
+                        wallet_address, score, confidence, high_confidence_eligible
+                    FROM wallet_scores
+                    ORDER BY wallet_address, scored_at DESC
+                ), candidate_addresses AS (
+                    SELECT wallet_address, max(updated_at) AS candidate_updated_at
+                    FROM wallet_candidates
+                    GROUP BY wallet_address
+                ), ranked_research AS (
+                    SELECT
+                        w.wallet_address,
+                        (ww.wallet_address IS NOT NULL) AS watchlisted,
+                        COALESCE(ls.score, 0) AS score,
+                        COALESCE(ls.confidence, 0) AS confidence,
+                        COALESCE(ls.high_confidence_eligible, false)
+                            AS high_confidence_eligible,
+                        w.last_seen_at,
+                        row_number() OVER (
+                            ORDER BY COALESCE(ls.score, 0) DESC,
+                                COALESCE(ls.confidence, 0) DESC,
+                                w.last_seen_at DESC NULLS LAST,
+                                ca.candidate_updated_at DESC,
+                                w.wallet_address
+                        ) AS research_rank
+                    FROM candidate_addresses ca
+                    JOIN wallets w ON w.wallet_address = ca.wallet_address
+                    LEFT JOIN watchlist_wallets ww
+                        ON ww.wallet_address = w.wallet_address AND ww.status = 'active'
+                    LEFT JOIN latest_scores ls ON ls.wallet_address = w.wallet_address
+                    ORDER BY COALESCE(ls.score, 0) DESC,
+                        COALESCE(ls.confidence, 0) DESC,
+                        w.last_seen_at DESC NULLS LAST,
+                        ca.candidate_updated_at DESC,
+                        w.wallet_address
+                    LIMIT :research_limit
+                ), paper_eligible AS (
+                    SELECT
+                        w.wallet_address,
+                        (ww.wallet_address IS NOT NULL) AS watchlisted,
+                        COALESCE(ls.score, 0) AS score,
+                        COALESCE(ls.confidence, 0) AS confidence,
+                        COALESCE(ls.high_confidence_eligible, false)
+                            AS high_confidence_eligible,
+                        w.last_seen_at
+                    FROM wallets w
+                    LEFT JOIN watchlist_wallets ww
+                        ON ww.wallet_address = w.wallet_address AND ww.status = 'active'
+                    LEFT JOIN latest_scores ls ON ls.wallet_address = w.wallet_address
+                    WHERE ww.wallet_address IS NOT NULL
+                        OR ls.high_confidence_eligible = true
+                        OR (ls.score >= 60 AND ls.confidence >= 0.35)
+                ), combined AS (
+                    SELECT rr.*, true AS research_sampled,
+                        false AS paper_eligible
+                    FROM ranked_research rr
+                    UNION ALL
+                    SELECT pe.*, NULL::bigint AS research_rank,
+                        false AS research_sampled, true AS paper_eligible
+                    FROM paper_eligible pe
+                )
+                SELECT
+                    wallet_address,
+                    bool_or(watchlisted) AS watchlisted,
+                    max(score) AS score,
+                    max(confidence) AS confidence,
+                    bool_or(high_confidence_eligible) AS high_confidence_eligible,
+                    max(last_seen_at) AS last_seen_at,
+                    min(research_rank) AS research_rank,
+                    bool_or(research_sampled) AS research_sampled,
+                    bool_or(paper_eligible) AS paper_eligible
+                FROM combined
+                GROUP BY wallet_address
+                ORDER BY bool_or(paper_eligible) DESC,
+                    min(research_rank) NULLS LAST,
+                    max(score) DESC,
+                    max(confidence) DESC,
+                    wallet_address
+                """
+            ),
+            {"research_limit": max(research_limit, 0)},
         )
         return [dict(row._mapping) for row in result]
 
@@ -671,5 +766,81 @@ class WalletDataRepository:
                 """
             ),
             {"since": since, "limit": limit},
+        )
+        return [str(row.token_id) for row in result]
+
+    def fetch_sampling_token_ids(
+        self,
+        *,
+        limit: int,
+        recent_hours: int = 168,
+        research_wallet_limit: int = 25,
+    ) -> list[str]:
+        """Return tokens needed by the research and strict paper sampling pools."""
+        since = datetime.now(UTC) - timedelta(hours=recent_hours)
+        sampling_wallets = self.fetch_sampling_wallets(research_wallet_limit)
+        wallet_addresses = [str(row["wallet_address"]) for row in sampling_wallets]
+        result = self.connection.execute(
+            text(
+                """
+                WITH candidate_tokens AS (
+                    SELECT mt.token_id, 0 AS priority, m.volume, mt.updated_at
+                    FROM watchlist_markets wm
+                    JOIN markets m ON m.condition_id = wm.condition_id
+                    JOIN market_tokens mt ON mt.condition_id = wm.condition_id
+                    WHERE wm.status = 'active'
+                        AND COALESCE(m.active, true) = true
+                        AND COALESCE(m.closed, false) = false
+                    UNION ALL
+                    SELECT t.token_id, 1 AS priority, m.volume, t.updated_at
+                    FROM trades t
+                    LEFT JOIN markets m ON m.condition_id = t.condition_id
+                    WHERE t.wallet_address = ANY(:wallet_addresses)
+                        AND t.token_id IS NOT NULL
+                        AND t.trade_timestamp >= :since
+                        AND COALESCE(m.closed, false) = false
+                    UNION ALL
+                    SELECT s.token_id, 2 AS priority, m.volume, s.updated_at
+                    FROM signals s
+                    LEFT JOIN markets m ON m.condition_id = s.market_id
+                    WHERE s.processing_status = 'pending'
+                        AND COALESCE(m.closed, false) = false
+                ), ranked_tokens AS (
+                    SELECT
+                        token_id,
+                        min(priority) AS priority,
+                        max(COALESCE(volume, 0)) AS volume,
+                        max(updated_at) AS updated_at
+                    FROM candidate_tokens
+                    WHERE token_id IS NOT NULL AND token_id <> ''
+                    GROUP BY token_id
+                )
+                SELECT rt.token_id
+                FROM ranked_tokens rt
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM raw_api_responses failed
+                    WHERE failed.endpoint = '/book'
+                        AND failed.request_params ->> 'token_id' = rt.token_id
+                        AND failed.status_code >= 400
+                        AND failed.captured_at >= now() - interval '15 minutes'
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM raw_api_responses recovered
+                            WHERE recovered.endpoint = '/book'
+                                AND recovered.request_params ->> 'token_id' = rt.token_id
+                                AND recovered.status_code < 400
+                                AND recovered.captured_at > failed.captured_at
+                        )
+                )
+                ORDER BY rt.priority, rt.volume DESC, rt.updated_at DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "wallet_addresses": wallet_addresses,
+                "since": since,
+                "limit": max(limit, 0),
+            },
         )
         return [str(row.token_id) for row in result]

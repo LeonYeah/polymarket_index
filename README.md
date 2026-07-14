@@ -69,9 +69,11 @@ python -m backend.scripts.run_paper_trading \
   --max-cycles 0
 ```
 
-The production sampling loop runs on the USA VPS with native PostgreSQL and systemd. It is not
-publicly exposed. See `docs/vps-sampling-runbook.md` for service operations, SSH tunneling,
-health checks, backups, and the seven-day acceptance window.
+The production sampling loop runs on the USA VPS with native PostgreSQL and systemd. Its read-only
+sampling pool includes the top 25 ranked research candidates plus strict paper-eligible wallets;
+paper signals still apply the independent score, confidence, and risk gates. Six-hour maintenance
+materializes mature CLV horizons before refreshing SmartScore. See `docs/vps-sampling-runbook.md`
+for service operations, SSH tunneling, health checks, backups, and the seven-day acceptance window.
 
 For a 24-hour watchlist archive, run with explicit watchlist tokens:
 

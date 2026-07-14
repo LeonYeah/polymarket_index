@@ -1,5 +1,5 @@
 [Unit]
-Description=Discover wallets and refresh Polymarket market metadata, PnL, and SmartScore
+Description=Discover wallets and refresh Polymarket metadata, CLV, PnL, and SmartScore
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=polymarket
 Group=polymarket
 WorkingDirectory=/opt/polymarket-wallet-tracker
 EnvironmentFile=/etc/polymarket-wallet-tracker.env
-ExecStart=/opt/polymarket-wallet-tracker/.venv/bin/python -m backend.scripts.run_sampling_maintenance --max-markets 500 --wallet-limit 150 --discovery-candidate-limit 500 --discovery-leaderboard-limit 150 --discovery-holder-limit 250 --discovery-active-trader-limit 250 --discovery-backfill-wallet-limit 25 --discovery-page-limit 100 --discovery-max-trade-pages 2
+ExecStart=/opt/polymarket-wallet-tracker/.venv/bin/python -m backend.scripts.run_sampling_maintenance --max-markets 500 --wallet-limit 150 --discovery-candidate-limit 500 --discovery-leaderboard-limit 150 --discovery-holder-limit 250 --discovery-active-trader-limit 250 --discovery-backfill-wallet-limit 25 --discovery-page-limit 100 --discovery-max-trade-pages 2 --clv-limit 1000 --research-wallet-limit 25
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
