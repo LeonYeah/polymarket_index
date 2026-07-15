@@ -1,6 +1,6 @@
 # Polymarket Wallet Tracker — 项目交接
 
-更新时间：2026-07-14
+更新时间：2026-07-15
 
 ## 新会话快速入口
 
@@ -16,7 +16,7 @@
    ```
 
 4. 当前主线是完成连续采样验收并积累可用 CLV、followability 和纸面成交样本，不是真实下单。
-5. 连续验收起点为 `2026-07-14 06:55:11 UTC`，最早在 `2026-07-21 06:55:11 UTC` 后评估。
+5. 连续验收起点为 `2026-07-15 10:15:13 UTC`，最早在 `2026-07-22 10:15:13 UTC` 后评估。
 
 ## 目标与安全边界
 
@@ -53,7 +53,7 @@ WSL Next.js Dashboard：127.0.0.1:3000
 2. 从 Data API offset 0 拉取这些钱包的最新交易，避免历史 checkpoint 完成后漏掉新交易。
 3. 根据钱包近期交易、watchlist 和 pending signal 选择最多 30 个 token，采集 CLOB 订单簿与 followability。
 4. Signal/Paper Engine 独立重放严格评分、置信度和风险门槛；研究池身份不授予模拟成交资格。
-5. maintenance 按“市场 → 候选发现/回填 → 成熟 CLV → PnL → SmartScore”运行，各阶段失败隔离。
+5. maintenance 先直接刷新全部 open paper position 对应市场，再进行常规市场采集，并按“候选发现/回填 → 成熟 CLV → PnL/市场 resolution → SmartScore”继续运行；paper cycle 据此完成 settlement，各阶段失败隔离。
 
 ### 代码结构
 
@@ -76,7 +76,7 @@ infra/                   WSL 本地开发用 Docker Compose
 
 | 环境 | 用途 | 数据库实体数据 | 当前规模 | 备份 |
 |---|---|---|---|---|
-| VPS `ssh usa` | 持续运行的主数据源 | `/var/lib/postgresql/16/main` | `polymarket` 约 4.75 GB；目录约 5.0 GB | `/var/backups/polymarket/polymarket-*.dump`，custom format，每日、保留 14 天 |
+| VPS `ssh usa` | 持续运行的主数据源 | `/var/lib/postgresql/16/main` | `polymarket` 约 6.24 GB | `/var/backups/polymarket/polymarket-*.dump`，custom format，每日、保留 14 天 |
 | WSL Docker | 独立开发副本 | 容器内 `/var/lib/postgresql/data`；volume `infra_postgres_data` | `polymarket` 约 757 MB；volume 约 1.0 GB | 当前没有项目数据库 dump |
 | WSL 原生 PostgreSQL | 未使用 | 原生服务当前 inactive | 无运行中实例 | 未发现 `.dump/.sql/.backup` |
 
@@ -115,27 +115,30 @@ infra/                   WSL 本地开发用 Docker Compose
 ### 纸面交易与生产运行
 
 - 已落地 signals、paper orders/events、positions 和 PnL 表及 API 展示。
-- 支持多钱包信号加权与合并、九类拒单原因、订单簿逐档模拟、FOK/FAK/GTC、部分成交、GTC 过期、结算和三段延迟。
+- 支持多钱包信号加权与合并、订单簿逐档模拟、FOK/FAK/GTC、部分成交、GTC 过期、结算和三段延迟。
+- 单 strategy/token 的累计 open cost basis 默认上限为 100 USDC，由 `PAPER_MAXIMUM_TOKEN_NOTIONAL` 配置；达到上限时拒单，剩余额度不足时按额度缩小模拟成交。
+- active watchlist 钱包保留 score 60 豁免，但不能绕过 confidence、流动性、价差、数据新鲜度、预期边际等风险门槛。
+- 市场采集会优先直连 Gamma 刷新全部 open paper position 对应市场；resolution 解析 outcome 与最终价格后，paper cycle 将订单和仓位推进为 settled。
 - PnL 区分 gross、fee、slippage、net，以及“方向正确但费用后亏损”。
 - VPS 已完成原生 PostgreSQL、systemd 自恢复、freshness 健康检查、六小时维护与每日备份部署。
-- 当前验证基线：后端 `83 passed`、Ruff 通过、Next.js production build 通过；只有既存 TestClient/httpx 弃用 warning。
+- 当前验证基线：后端 `86 passed`、Ruff 通过、Next.js production build 通过；只有既存 TestClient/httpx 弃用 warning。
 - root 环境已安装 `fnm 1.39.0`，项目用 `.node-version` 固定 Node `22.23.1`，不再依赖 `.vscode-remote-containers` 内的 Node。
 
 ## 当前运行状态
 
 - VPS 服务与 timers 均 active，无 failed systemd unit；健康接口通常为 `healthy`。采样周期执行中会短暂显示 `degraded`，周期成功结束后恢复，需结合 job status 判断。
-- sampler 每轮采集 Top 25 研究钱包与 1 个 watchlist/严格池钱包，去重后共 26 个；每轮最多归档 30 个相关 token 的订单簿。
+- sampler 每轮取 Top 25 研究钱包与严格 paper 钱包的并集；每轮最多归档 30 个相关 token 的订单簿。
 - 最近一次 maintenance 成功刷新 1000 条 CLV；数据库现有 1200 条 CLV 行，其中 462 条至少有一个可用时间窗。
 - 最新评分覆盖 150 个钱包，最高分 `54.6848`；达到 `score >= 60` 的钱包为 0，高置信可跟单钱包为 0。
-- 数据库已有历史 signals/orders，但目前都被严格门槛拒绝；paper positions 和 paper PnL 仍为 0。现阶段缺少成交样本是数据证据不足的结果，不是放宽风险阈值的理由。
-- VPS 部署内容与本次采样池/CLV 代码一致；部署目录此前以 Git `d65370a` 为基线并带工作树改动，后续应以本次新提交同步 Git 状态。
+- 2026-07-15 已优先刷新并结算 France 2026 World Cup `No` 仓位：1 个 position、89 笔 paper order 均为 settled，结算价 1，汇总 net PnL `1798.585324` USDC；当前 open position 与未结算模拟订单均为 0。该样本高度集中且费用模型仍为占位，不能据此评价策略稳定性。
+- VPS 已部署 schema `2026_07_15_paper_risk_and_resolution_v1`；`/paper/health` 为 healthy，采样进程已加载 100 USDC 单 token 上限。
 
 ## 未完成事项与技术债务
 
 ### P0：运行验收与可观测性
 
 - 完成连续 7 天验收：核对周期缺口、失败次数、freshness、订单簿成功率、服务重启、磁盘增长和备份连续性，并更新正式验收报告。
-- 至少积累 2–4 周纸面结果；当前没有 fill、position 或 PnL 样本，无法评价 net ROI、win rate、max drawdown 和策略稳定性。
+- 至少积累 2–4 周且覆盖多个独立市场的纸面结果；当前只有 1 个已结算仓位、89 笔同源订单，仍无法可靠评价 net ROI、win rate、max drawdown 和策略稳定性。
 - 告警规则尚未由 VPS timer 定时生成，也没有邮件、Webhook 等外部通知和升级机制。
 - 数据库备份尚未执行完整恢复演练；需要在隔离环境验证 dump 可恢复、schema 完整和服务可启动。
 - VPS 磁盘仅 38 GB，数据库增长快；需建立容量阈值、增长率监控和归档/清理策略。

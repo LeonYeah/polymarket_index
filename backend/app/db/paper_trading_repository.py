@@ -155,7 +155,9 @@ class PaperTradingRepository:
             ),
             {
                 **signal.__dict__,
-                "evidence": _json({**signal.evidence, "merged_signal_ids": signal.merged_signal_ids}),
+                "evidence": _json(
+                    {**signal.evidence, "merged_signal_ids": signal.merged_signal_ids}
+                ),
                 "run_id": run_id,
             },
         )
@@ -295,9 +297,7 @@ class PaperTradingRepository:
                     """
                 ),
                 {
-                    "processing_status": (
-                        "rejected" if order.status == "rejected" else "ordered"
-                    ),
+                    "processing_status": ("rejected" if order.status == "rejected" else "ordered"),
                     "signal_id": order.signal_id,
                 },
             )
@@ -338,6 +338,21 @@ class PaperTradingRepository:
                 },
             )
         return len(order_ids)
+
+    def fetch_open_token_exposure(self, *, strategy_version: str, token_id: str) -> Decimal:
+        value = self.connection.execute(
+            text(
+                """
+                SELECT COALESCE(sum(cost_basis), 0)
+                FROM paper_positions
+                WHERE strategy_version = :strategy_version
+                    AND token_id = :token_id
+                    AND status = 'open'
+                """
+            ),
+            {"strategy_version": strategy_version, "token_id": token_id},
+        ).scalar_one()
+        return Decimal(str(value))
 
     def upsert_position(self, order: PaperOrderDecision, *, run_id: str) -> int:
         if order.filled_size <= 0 or order.estimated_fill_price is None:

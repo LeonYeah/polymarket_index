@@ -138,6 +138,7 @@ def test_schema_records_paper_lifecycle_latency_and_reject_reasons() -> None:
         "market_not_accepting_orders",
         "compliance_block",
         "negative_expected_edge",
+        "token_exposure_limit",
     ]:
         assert f"'{reason}'" in SCHEMA_SQL
     assert "detection_latency_ms bigint" in SCHEMA_SQL

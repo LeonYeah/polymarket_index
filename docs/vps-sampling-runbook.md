@@ -18,7 +18,7 @@
 |---|---|---|
 | `polymarket-api.service` | 常驻 | 本地回环 FastAPI。 |
 | `polymarket-sampler.service` | 常驻 | 每分钟采集 Top 25 研究钱包与严格 paper 钱包的增量交易和相关订单簿，再执行 paper cycle。 |
-| `polymarket-maintenance.timer` | 6 小时 | 刷新市场、发现候选钱包、受限回填、CLV、PnL 和 SmartScore。 |
+| `polymarket-maintenance.timer` | 6 小时 | 优先刷新 open paper position 市场，再刷新常规市场、候选钱包、CLV、PnL/resolution 和 SmartScore。 |
 | `polymarket-health.timer` | 5 分钟 | 检查连续周期是否在 300 秒 freshness SLA 内。 |
 | `polymarket-backup.timer` | 每日 | PostgreSQL custom dump，保留 14 天。 |
 
@@ -74,8 +74,8 @@ PnL 和 SmartScore 使用上一份可用快照继续刷新。
 
 - 数据采样池包含按最新 SmartScore、confidence 和活跃时间排序的 Top 25 候选钱包，并与严格
   paper 钱包取并集；入选仅代表读取公开交易和相关订单簿，不授予模拟成交资格。
-- 严格 paper 钱包仍必须是 active watchlist、通过高置信硬门槛，或同时达到 score 60 与
-  confidence 0.35；Signal/Paper Engine 会独立重放这些条件和全部风险门槛。
+- 严格 paper 钱包可通过 active watchlist 或 `score >= 60` 进入候选；watchlist 只豁免 60 分，
+  两类钱包都必须达到 `confidence >= 0.35`，Signal/Paper Engine 仍会重放全部风险门槛。
 - maintenance 每 6 小时补算最多 1000 条尚未计算或已有成熟新时间窗的 CLV，再刷新
   SmartScore，使研究采样证据可以推动钱包进入或退出严格池。
 
@@ -87,7 +87,16 @@ PnL 和 SmartScore 使用上一份可用快照继续刷新。
 4. 运行 FAK paper cycle，记录 signal、拒单/模拟成交、延迟、仓位和 PnL。
 5. CLOB 失败 token 冷却 15 分钟后自动重试，避免每分钟重复请求已失效 book。
 
-最后一次部署重启后，连续验收起点为 `2026-07-14 06:55:11 UTC`。在至少运行至 `2026-07-21 06:55:11 UTC` 且 freshness、失败周期和数据质量复核通过前，不宣称完成 7 天验收。
+风险与结算规则：
+
+- `PAPER_MAXIMUM_TOKEN_NOTIONAL` 控制单 strategy/token 的累计 open cost basis，生产默认 `100`
+  USDC；剩余额度不足时缩小模拟成交，低于最小下单额时以 `token_exposure_limit` 拒单。
+- 每次市场维护先读取全部 open paper position，按 Gamma market id 直接刷新这些市场；该结果
+  优先于常规分页数据且不占用常规 `max_markets` 配额。
+- PnL 阶段根据 `outcomes`、`outcomePrices` 和关闭时间写入 winning outcome 与 resolution；后续
+  paper valuation 将关联订单与仓位推进到 `settled`。
+
+最后一次部署重启后，连续验收起点为 `2026-07-15 10:15:13 UTC`。在至少运行至 `2026-07-22 10:15:13 UTC` 且 freshness、失败周期和数据质量复核通过前，不宣称完成 7 天验收。
 
 ## 备份与恢复
 

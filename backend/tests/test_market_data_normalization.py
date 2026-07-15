@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
+
+import httpx
 
 from backend.app.collectors.market_data import (
+    MarketDataIngestion,
     market_matches_categories,
     normalize_holders,
     normalize_live_volume_snapshots,
@@ -13,6 +18,7 @@ from backend.app.collectors.market_data import (
     parse_decimal,
     parse_json_array,
 )
+from backend.app.core.config import Settings
 
 
 def test_parse_json_array_accepts_gamma_string_fields() -> None:
@@ -138,3 +144,47 @@ def test_normalize_holders_lowercases_wallets_and_preserves_token() -> None:
     assert rows[0]["token_id"] == "111"
     assert rows[0]["wallet_address"] == "0xabc"
     assert rows[0]["amount"] == Decimal("12.34")
+
+
+class RawResponseRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def record_raw_response(self, **kwargs: Any) -> None:
+        self.calls.append(dict(kwargs))
+
+
+def test_open_paper_market_refresh_uses_direct_gamma_market_endpoint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/markets/558936"
+        return httpx.Response(
+            200,
+            json={
+                "id": "558936",
+                "conditionId": "0xmarket",
+                "closed": True,
+                "outcomes": '["Yes", "No"]',
+                "outcomePrices": '["0", "1"]',
+            },
+            request=request,
+        )
+
+    async def run() -> tuple[list[object], int, list[str], RawResponseRecorder]:
+        recorder = RawResponseRecorder()
+        ingestion = MarketDataIngestion(Settings(), engine=None)  # type: ignore[arg-type]
+        warnings: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            markets, failures = await ingestion._fetch_priority_markets(
+                client,
+                "run-1",
+                recorder,  # type: ignore[arg-type]
+                [{"condition_id": "0xmarket", "gamma_market_id": "558936"}],
+                warnings,
+            )
+        return list(markets), failures, warnings, recorder
+
+    markets, failures, warnings, recorder = asyncio.run(run())
+    assert failures == 0
+    assert warnings == []
+    assert markets[0]["conditionId"] == "0xmarket"  # type: ignore[index]
+    assert recorder.calls[0]["endpoint"].endswith("/markets/558936")

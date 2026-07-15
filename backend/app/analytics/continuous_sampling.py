@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import Engine
 
+from backend.app.analytics.paper_trading import StrategyConfig
 from backend.app.analytics.paper_trading_runner import run_paper_trading
 from backend.app.collectors.incremental_wallet_data import run_incremental_wallet_sync
 from backend.app.collectors.price_data import run_price_archive_sync
@@ -98,6 +99,9 @@ def run_continuous_sampling_cycle(
             signal_limit=500,
             valuation_limit=1000,
             order_type="FAK",
+            config=StrategyConfig(
+                maximum_token_notional=settings.paper_maximum_token_notional,
+            ),
         )
         counters["paper_trading"] = paper_result.counters
         if paper_result.status != "completed":

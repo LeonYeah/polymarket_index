@@ -113,9 +113,7 @@ def test_fok_rejects_partial_liquidity() -> None:
 
 
 def test_gtc_stays_created_when_nothing_is_immediately_fillable() -> None:
-    order = simulate_order(
-        signal(), market(), [], order_type="GTC", decision_at=NOW
-    )
+    order = simulate_order(signal(), market(), [], order_type="GTC", decision_at=NOW)
     assert order.status == "created"
     assert order.reject_reason is None
 
@@ -173,3 +171,35 @@ def test_pnl_distinguishes_correct_direction_from_profit_after_costs() -> None:
     assert result.gross_pnl == Decimal("0.10")
     assert result.net_pnl == Decimal("-0.10")
     assert result.profitable_after_costs is False
+
+
+def test_token_exposure_limit_rejects_new_order_at_configured_cap() -> None:
+    order = simulate_order(
+        signal(reason="watchlist_wallet_trade"),
+        market(),
+        [BookLevel(Decimal("0.50"), Decimal("1000"))],
+        config=StrategyConfig(maximum_token_notional=Decimal("100")),
+        current_token_exposure=Decimal("100"),
+        decision_at=NOW,
+    )
+
+    assert order.status == "rejected"
+    assert order.reject_reason == "token_exposure_limit"
+    assert order.requested_notional == 0
+    assert order.filled_size == 0
+
+
+def test_token_exposure_limit_uses_only_remaining_cost_basis() -> None:
+    order = simulate_order(
+        signal(reason="watchlist_wallet_trade"),
+        market(),
+        [BookLevel(Decimal("0.51"), Decimal("1000"))],
+        config=StrategyConfig(maximum_token_notional=Decimal("100")),
+        current_token_exposure=Decimal("90"),
+        decision_at=NOW,
+    )
+
+    assert order.status == "would_partial_fill"
+    assert order.requested_notional == Decimal("10")
+    assert order.filled_size * order.estimated_fill_price == Decimal("10")
+    assert order.evidence["remaining_token_notional"] == Decimal("10")

@@ -87,6 +87,7 @@ class PnLRepository:
                 SELECT
                     condition_id,
                     CASE
+                        WHEN winner.winning_outcome IS NOT NULL THEN 'resolved'
                         WHEN archived THEN 'archived'
                         WHEN closed THEN 'closed'
                         WHEN active THEN 'open'
@@ -95,19 +96,46 @@ class PnLRepository:
                     closed,
                     active,
                     archived,
-                    CASE WHEN closed THEN end_date ELSE NULL END AS resolved_at,
-                    NULL AS winning_outcome,
+                    CASE WHEN winner.winning_outcome IS NOT NULL THEN COALESCE(
+                        NULLIF(raw ->> 'closedTime', '')::timestamptz,
+                        NULLIF(raw ->> 'umaEndDate', '')::timestamptz,
+                        end_date
+                    ) ELSE NULL END AS resolved_at,
+                    winner.winning_outcome,
                     raw,
                     'markets',
                     :run_id
                 FROM markets
+                LEFT JOIN LATERAL (
+                    SELECT outcome.value AS winning_outcome
+                    FROM jsonb_array_elements_text(
+                        CASE jsonb_typeof(markets.raw -> 'outcomes')
+                            WHEN 'array' THEN markets.raw -> 'outcomes'
+                            WHEN 'string' THEN (markets.raw ->> 'outcomes')::jsonb
+                            ELSE '[]'::jsonb
+                        END
+                    ) WITH ORDINALITY AS outcome(value, ordinal)
+                    JOIN jsonb_array_elements_text(
+                        CASE jsonb_typeof(markets.raw -> 'outcomePrices')
+                            WHEN 'array' THEN markets.raw -> 'outcomePrices'
+                            WHEN 'string' THEN (markets.raw ->> 'outcomePrices')::jsonb
+                            ELSE '[]'::jsonb
+                        END
+                    ) WITH ORDINALITY AS price(value, ordinal) USING (ordinal)
+                    WHERE markets.closed IS TRUE
+                        AND price.value::numeric >= 0.99
+                    ORDER BY price.value::numeric DESC
+                    LIMIT 1
+                ) winner ON true
                 ON CONFLICT (condition_id) DO UPDATE SET
                     status = EXCLUDED.status,
                     closed = EXCLUDED.closed,
                     active = EXCLUDED.active,
                     archived = EXCLUDED.archived,
                     resolved_at = EXCLUDED.resolved_at,
+                    winning_outcome = EXCLUDED.winning_outcome,
                     raw = EXCLUDED.raw,
+                    source = EXCLUDED.source,
                     ingestion_run_id = EXCLUDED.ingestion_run_id,
                     updated_at = now()
                 """
@@ -226,7 +254,11 @@ class PnLRepository:
                         updated_at = now()
                     """
                 ),
-                {**row, "run_id": run_id, "calculation_notes": _json(row.get("calculation_notes", {}))},
+                {
+                    **row,
+                    "run_id": run_id,
+                    "calculation_notes": _json(row.get("calculation_notes", {})),
+                },
             )
             count += 1
         return count
@@ -267,9 +299,7 @@ class PnLRepository:
             count += 1
         return count
 
-    def insert_reconciliation_checks(
-        self, rows: Iterable[Mapping[str, Any]], run_id: str
-    ) -> int:
+    def insert_reconciliation_checks(self, rows: Iterable[Mapping[str, Any]], run_id: str) -> int:
         count = 0
         for row in rows:
             self.connection.execute(
@@ -438,9 +468,7 @@ class PnLRepository:
         )
         return [dict(row._mapping) for row in result]
 
-    def _fetch_market_statuses(
-        self, condition_ids: Iterable[str]
-    ) -> dict[str, dict[str, Any]]:
+    def _fetch_market_statuses(self, condition_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
         ids = list(dict.fromkeys(condition_ids))
         if not ids:
             return {}

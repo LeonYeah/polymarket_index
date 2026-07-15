@@ -47,6 +47,7 @@ class StrategyConfig:
     settlement_buffer: timedelta = timedelta(hours=1)
     fee_rate: Decimal = Decimal("0.002")
     maximum_notional: Decimal = Decimal("100")
+    maximum_token_notional: Decimal = Decimal("100")
     minimum_notional: Decimal = Decimal("5")
     default_worst_price_move: Decimal = Decimal("0.03")
 
@@ -235,6 +236,7 @@ def simulate_order(
     *,
     order_type: OrderType = "FAK",
     config: StrategyConfig | None = None,
+    current_token_exposure: Decimal = ZERO,
     decision_at: datetime | None = None,
     simulated_at: datetime | None = None,
 ) -> PaperOrderDecision:
@@ -242,10 +244,17 @@ def simulate_order(
     decision_at = decision_at or utc_now()
     simulated_at = simulated_at or decision_at
     reference_price = market.midpoint or signal.leader_price
-    target_notional = min(
-        config.maximum_notional,
-        max(config.minimum_notional, signal.leader_price * signal.leader_size * signal.wallet_weight),
+    remaining_token_notional = max(
+        ZERO,
+        config.maximum_token_notional - max(ZERO, current_token_exposure),
     )
+    desired_notional = min(
+        config.maximum_notional,
+        max(
+            config.minimum_notional, signal.leader_price * signal.leader_size * signal.wallet_weight
+        ),
+    )
+    target_notional = min(desired_notional, remaining_token_notional)
     requested_size = target_notional / reference_price if reference_price > ZERO else ZERO
     price_move = config.default_worst_price_move
     worst_price = (
@@ -255,11 +264,15 @@ def simulate_order(
     )
     rejection = _reject_reason(signal, market, config, decision_at)
     eligible_levels = _eligible_levels(signal.side, levels, worst_price)
-    fill_size, fill_notional = _fill(eligible_levels, requested_size)
+    fill_size, fill_notional = _fill(
+        eligible_levels,
+        requested_size,
+        maximum_notional=remaining_token_notional,
+    )
     average_fill = fill_notional / fill_size if fill_size > ZERO else None
 
-    if rejection is None and requested_size <= ZERO:
-        rejection = "negative_expected_edge"
+    if rejection is None and target_notional < config.minimum_notional:
+        rejection = "token_exposure_limit"
     if rejection is None and order_type == "FOK" and fill_size < requested_size:
         rejection = "low_liquidity"
         fill_size, fill_notional, average_fill = ZERO, ZERO, None
@@ -282,9 +295,7 @@ def simulate_order(
             else reference_price - average_fill
         )
     fee = fill_notional * config.fee_rate
-    order_id = stable_uid(
-        ["paper_order", signal.signal_id, config.strategy_version, order_type]
-    )
+    order_id = stable_uid(["paper_order", signal.signal_id, config.strategy_version, order_type])
     return PaperOrderDecision(
         order_id=order_id,
         signal_id=signal.signal_id,
@@ -317,6 +328,9 @@ def simulate_order(
             "reference_price": reference_price,
             "signal_reason": signal.reason,
             "merged_signal_ids": signal.merged_signal_ids,
+            "current_token_exposure": current_token_exposure,
+            "maximum_token_notional": config.maximum_token_notional,
+            "remaining_token_notional": remaining_token_notional,
         },
     )
 
@@ -384,25 +398,40 @@ def _reject_reason(
     if (
         expected_edge is None
         and market.midpoint is not None
-        and (market.midpoint - signal.leader_price) * direction
-        > config.default_worst_price_move
+        and (market.midpoint - signal.leader_price) * direction > config.default_worst_price_move
     ):
         return "negative_expected_edge"
     return None
 
 
-def _eligible_levels(side: Side, levels: Sequence[BookLevel], worst_price: Decimal) -> list[BookLevel]:
+def _eligible_levels(
+    side: Side, levels: Sequence[BookLevel], worst_price: Decimal
+) -> list[BookLevel]:
     if side == "BUY":
-        return sorted((row for row in levels if row.price <= worst_price), key=lambda row: row.price)
-    return sorted((row for row in levels if row.price >= worst_price), key=lambda row: row.price, reverse=True)
+        return sorted(
+            (row for row in levels if row.price <= worst_price), key=lambda row: row.price
+        )
+    return sorted(
+        (row for row in levels if row.price >= worst_price), key=lambda row: row.price, reverse=True
+    )
 
 
-def _fill(levels: Sequence[BookLevel], requested_size: Decimal) -> tuple[Decimal, Decimal]:
+def _fill(
+    levels: Sequence[BookLevel],
+    requested_size: Decimal,
+    *,
+    maximum_notional: Decimal | None = None,
+) -> tuple[Decimal, Decimal]:
     remaining = requested_size
     filled = ZERO
     notional = ZERO
     for level in levels:
         take = min(remaining, level.size)
+        if maximum_notional is not None:
+            remaining_notional = max(ZERO, maximum_notional - notional)
+            if remaining_notional <= ZERO or level.price <= ZERO:
+                break
+            take = min(take, remaining_notional / level.price)
         filled += take
         notional += take * level.price
         remaining -= take

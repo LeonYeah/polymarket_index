@@ -5,7 +5,9 @@ import json
 import time
 from typing import Any
 
+from backend.app.analytics.paper_trading import StrategyConfig
 from backend.app.analytics.paper_trading_runner import run_paper_trading
+from backend.app.core.config import get_settings
 from backend.app.db.database import make_engine
 
 
@@ -29,6 +31,7 @@ def main() -> None:
     )
     parser.add_argument("--database-url", default=None, help="Override DATABASE_URL.")
     args = parser.parse_args()
+    settings = get_settings()
     engine = make_engine(args.database_url)
     cycle = 0
     while True:
@@ -40,6 +43,9 @@ def main() -> None:
                 signal_limit=args.signal_limit,
                 valuation_limit=args.valuation_limit,
                 order_type=args.order_type,
+                config=StrategyConfig(
+                    maximum_token_notional=settings.paper_maximum_token_notional,
+                ),
             )
             payload: dict[str, Any] = {**result.__dict__, "cycle": cycle}
         except Exception as exc:

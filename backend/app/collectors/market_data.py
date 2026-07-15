@@ -203,7 +203,9 @@ def market_matches_categories(raw: Mapping[str, Any], categories: set[str]) -> b
     return category.lower() in categories
 
 
-def normalize_market_snapshot(raw: Mapping[str, Any], run_id: str, snapshot_at: datetime) -> dict[str, Any] | None:
+def normalize_market_snapshot(
+    raw: Mapping[str, Any], run_id: str, snapshot_at: datetime
+) -> dict[str, Any] | None:
     condition_id = raw.get("conditionId") or raw.get("condition_id")
     if not condition_id:
         return None
@@ -222,7 +224,9 @@ def normalize_market_snapshot(raw: Mapping[str, Any], run_id: str, snapshot_at: 
     }
 
 
-def normalize_oi_snapshot(raw: Mapping[str, Any], run_id: str, snapshot_at: datetime) -> dict[str, Any] | None:
+def normalize_oi_snapshot(
+    raw: Mapping[str, Any], run_id: str, snapshot_at: datetime
+) -> dict[str, Any] | None:
     market = raw.get("market")
     if not market:
         return None
@@ -338,9 +342,7 @@ class MarketDataIngestion:
         max_markets = (
             self.settings.market_ingestion_max_markets if max_markets is None else max_markets
         )
-        page_limit = (
-            self.settings.market_ingestion_page_limit if page_limit is None else page_limit
-        )
+        page_limit = self.settings.market_ingestion_page_limit if page_limit is None else page_limit
         holders_market_limit = (
             self.settings.market_ingestion_holders_market_limit
             if holders_market_limit is None
@@ -368,6 +370,9 @@ class MarketDataIngestion:
             "raw_responses": 0,
             "market_pages": 0,
             "uncategorized_markets": 0,
+            "priority_markets_requested": 0,
+            "priority_markets_refreshed": 0,
+            "priority_market_failures": 0,
         }
         warnings: list[str] = []
         params = {
@@ -382,22 +387,49 @@ class MarketDataIngestion:
         with self.engine.begin() as connection:
             repository = MarketDataRepository(connection)
             repository.start_run(run_id, "market_data_ingestion", "polymarket", started_at, params)
+            priority_targets = repository.fetch_open_paper_market_targets()
+            counters["priority_markets_requested"] = len(priority_targets)
             try:
-                async with httpx.AsyncClient(timeout=self.settings.api_probe_timeout_seconds) as client:
-                    markets_payloads = await self._fetch_market_pages(
-                        client, run_id, repository, max_markets, page_limit, category_filter, warnings
+                async with httpx.AsyncClient(
+                    timeout=self.settings.api_probe_timeout_seconds
+                ) as client:
+                    priority_markets, priority_failures = await self._fetch_priority_markets(
+                        client, run_id, repository, priority_targets, warnings
                     )
-                    markets_raw = [
+                    counters["priority_markets_refreshed"] = len(priority_markets)
+                    counters["priority_market_failures"] = priority_failures
+                    counters["raw_responses"] += len(priority_markets)
+                    markets_payloads = await self._fetch_market_pages(
+                        client,
+                        run_id,
+                        repository,
+                        max_markets,
+                        page_limit,
+                        category_filter,
+                        warnings,
+                    )
+                    page_markets = [
                         market
                         for payload in markets_payloads
                         for market in first_list(payload, "markets")
-                        if isinstance(market, Mapping) and market_matches_categories(market, category_filter)
+                        if isinstance(market, Mapping)
+                        and market_matches_categories(market, category_filter)
                     ][:max_markets]
-                    uncategorized_count = sum(1 for market in markets_raw if market_category(market) is None)
+                    markets_by_condition = {
+                        str(market.get("conditionId") or market.get("condition_id")): market
+                        for market in [*page_markets, *priority_markets]
+                        if market.get("conditionId") or market.get("condition_id")
+                    }
+                    markets_raw = list(markets_by_condition.values())
+                    uncategorized_count = sum(
+                        1 for market in markets_raw if market_category(market) is None
+                    )
                     counters["uncategorized_markets"] += uncategorized_count
                     if uncategorized_count and category_filter:
                         warnings.append("gamma_market_category_missing_retained_for_ingestion")
-                    events_raw = await self._fetch_events_page(client, run_id, repository, page_limit)
+                    events_raw = await self._fetch_events_page(
+                        client, run_id, repository, page_limit
+                    )
                     counters["raw_responses"] += len(markets_payloads) + 1
                     counters["market_pages"] += len(markets_payloads)
 
@@ -411,7 +443,9 @@ class MarketDataIngestion:
                     market_snapshots = []
                     snapshot_at = utc_now()
                     for raw_market in markets_raw:
-                        market, embedded_events, tokens = normalize_market_bundle(raw_market, run_id)
+                        market, embedded_events, tokens = normalize_market_bundle(
+                            raw_market, run_id
+                        )
                         if market:
                             normalized_markets.append(market)
                             normalized_events.extend(embedded_events)
@@ -499,11 +533,60 @@ class MarketDataIngestion:
 
                 finished_at = utc_now()
                 repository.finish_run(run_id, "succeeded", finished_at, counters)
-                return IngestionResult(run_id, "succeeded", counters, started_at, finished_at, warnings)
+                return IngestionResult(
+                    run_id, "succeeded", counters, started_at, finished_at, warnings
+                )
             except Exception as exc:
                 finished_at = utc_now()
                 repository.finish_run(run_id, "failed", finished_at, counters, str(exc))
                 raise
+
+    async def _fetch_priority_markets(
+        self,
+        client: httpx.AsyncClient,
+        run_id: str,
+        repository: MarketDataRepository,
+        targets: list[dict[str, str]],
+        warnings: list[str],
+    ) -> tuple[list[Mapping[str, Any]], int]:
+        gamma_base = str(self.settings.polymarket_gamma_base_url).rstrip("/")
+        markets: list[Mapping[str, Any]] = []
+        failures = 0
+        for target in targets:
+            condition_id = target["condition_id"]
+            gamma_market_id = target["gamma_market_id"]
+            if not gamma_market_id:
+                failures += 1
+                warnings.append(f"priority_market_missing_gamma_id:{condition_id}")
+                continue
+            try:
+                payload = await self._fetch_json(
+                    client,
+                    repository,
+                    run_id,
+                    "gamma",
+                    f"{gamma_base}/markets/{gamma_market_id}",
+                    {},
+                    "market",
+                    absolute_url=True,
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                failures += 1
+                warnings.append(
+                    f"priority_market_refresh_failed:{condition_id}:{type(exc).__name__}"
+                )
+                continue
+            if not isinstance(payload, Mapping):
+                failures += 1
+                warnings.append(f"priority_market_invalid_payload:{condition_id}")
+                continue
+            actual_condition_id = payload.get("conditionId") or payload.get("condition_id")
+            if str(actual_condition_id) != condition_id:
+                failures += 1
+                warnings.append(f"priority_market_condition_mismatch:{condition_id}")
+                continue
+            markets.append(payload)
+        return markets, failures
 
     async def _fetch_market_pages(
         self,
@@ -549,7 +632,8 @@ class MarketDataIngestion:
             matched_count += sum(
                 1
                 for market in markets
-                if isinstance(market, Mapping) and market_matches_categories(market, category_filter)
+                if isinstance(market, Mapping)
+                and market_matches_categories(market, category_filter)
             )
             if not next_cursor or next_cursor in seen_cursors:
                 break
@@ -686,7 +770,9 @@ def _dedupe_by(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     return list(deduped.values())
 
 
-async def run_market_ingestion(settings: Settings, engine: Engine, **kwargs: Any) -> IngestionResult:
+async def run_market_ingestion(
+    settings: Settings, engine: Engine, **kwargs: Any
+) -> IngestionResult:
     ingestion = MarketDataIngestion(settings, engine)
     return await ingestion.run(**kwargs)
 

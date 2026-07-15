@@ -75,6 +75,26 @@ class MarketDataRepository:
             },
         )
 
+    def fetch_open_paper_market_targets(self) -> list[dict[str, str]]:
+        rows = self.connection.execute(
+            text(
+                """
+                SELECT DISTINCT pp.market_id AS condition_id, m.gamma_market_id
+                FROM paper_positions pp
+                LEFT JOIN markets m ON m.condition_id = pp.market_id
+                WHERE pp.status = 'open'
+                ORDER BY pp.market_id
+                """
+            )
+        )
+        return [
+            {
+                "condition_id": str(row.condition_id),
+                "gamma_market_id": str(row.gamma_market_id) if row.gamma_market_id else "",
+            }
+            for row in rows
+        ]
+
     def record_raw_response(
         self,
         *,
@@ -175,10 +195,10 @@ class MarketDataRepository:
                     )
                     ON CONFLICT (condition_id) DO UPDATE SET
                         gamma_market_id = EXCLUDED.gamma_market_id,
-                        gamma_event_id = EXCLUDED.gamma_event_id,
+                        gamma_event_id = COALESCE(EXCLUDED.gamma_event_id, markets.gamma_event_id),
                         slug = EXCLUDED.slug,
                         question = EXCLUDED.question,
-                        category = EXCLUDED.category,
+                        category = COALESCE(EXCLUDED.category, markets.category),
                         active = EXCLUDED.active,
                         closed = EXCLUDED.closed,
                         archived = EXCLUDED.archived,

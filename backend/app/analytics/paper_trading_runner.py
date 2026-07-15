@@ -117,6 +117,10 @@ def _execute_cycle(
         counters["signals"] += repository.insert_signal(signal, run_id=run_id)
     actionable = _merge_signals(raw_signals, repository, run_id, counters)
     for signal in actionable:
+        current_token_exposure = repository.fetch_open_token_exposure(
+            strategy_version=config.strategy_version,
+            token_id=signal.token_id,
+        )
         context, levels = repository.fetch_market_context(signal)
         decision_at = datetime.now(UTC)
         order = simulate_order(
@@ -125,6 +129,7 @@ def _execute_cycle(
             levels,
             order_type=order_type,
             config=config,
+            current_token_exposure=current_token_exposure,
             decision_at=decision_at,
             simulated_at=datetime.now(UTC),
         )
@@ -163,9 +168,7 @@ def _merge_signals(
     grouped: dict[tuple[str, str, str, int], list[Signal]] = defaultdict(list)
     for signal in signals:
         five_minute_bucket = int(signal.leader_trade_time.timestamp()) // 300
-        grouped[
-            (signal.market_id, signal.token_id, signal.side, five_minute_bucket)
-        ].append(signal)
+        grouped[(signal.market_id, signal.token_id, signal.side, five_minute_bucket)].append(signal)
     actionable: list[Signal] = []
     for rows in grouped.values():
         distinct_wallets = {row.leader_wallet for row in rows}

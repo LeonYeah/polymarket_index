@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_10_week08_paper_trading_schema_v1"
+SCHEMA_VERSION = "2026_07_15_paper_risk_and_resolution_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -853,7 +853,7 @@ CREATE TABLE IF NOT EXISTS paper_orders (
         reject_reason IS NULL OR reject_reason IN (
             'insufficient_score', 'low_confidence', 'low_liquidity', 'wide_spread',
             'stale_data', 'late_signal', 'market_not_accepting_orders',
-            'compliance_block', 'negative_expected_edge'
+            'compliance_block', 'negative_expected_edge', 'token_exposure_limit'
         )
     ),
     leader_trade_time timestamptz NOT NULL,
@@ -943,6 +943,15 @@ CREATE TABLE IF NOT EXISTS paper_pnl (
 
 CREATE INDEX IF NOT EXISTS paper_pnl_strategy_time_idx
     ON paper_pnl(strategy_version, valued_at DESC);
+
+ALTER TABLE paper_orders DROP CONSTRAINT IF EXISTS paper_orders_reject_reason_check;
+ALTER TABLE paper_orders ADD CONSTRAINT paper_orders_reject_reason_check CHECK (
+    reject_reason IS NULL OR reject_reason IN (
+        'insufficient_score', 'low_confidence', 'low_liquidity', 'wide_spread',
+        'stale_data', 'late_signal', 'market_not_accepting_orders',
+        'compliance_block', 'negative_expected_edge', 'token_exposure_limit'
+    )
+);
 """
 
 

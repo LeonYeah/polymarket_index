@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import AnyUrl, Field
@@ -61,6 +62,12 @@ class Settings(BaseSettings):
     price_archive_clv_reference_delay_seconds: int = 0
     price_archive_followability_size: str = "10"
     price_archive_followability_max_spread_bps: str = "500"
+
+    paper_maximum_token_notional: Decimal = Field(
+        default=Decimal("100"),
+        gt=0,
+        description="Maximum open paper cost basis per strategy and token in USDC.",
+    )
 
 
 @lru_cache
