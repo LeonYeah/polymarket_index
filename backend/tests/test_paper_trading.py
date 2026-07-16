@@ -123,6 +123,7 @@ def test_gtc_stays_created_when_nothing_is_immediately_fillable() -> None:
     [
         ({"score": Decimal("20")}, {}, "insufficient_score"),
         ({"confidence": Decimal("0.1")}, {}, "low_confidence"),
+        ({}, {"metadata_available": False}, "market_metadata_missing"),
         ({}, {"accepting_orders": False}, "market_not_accepting_orders"),
         ({}, {"snapshot_at": NOW - timedelta(minutes=5)}, "stale_data"),
         ({"detected_at": NOW - timedelta(minutes=20)}, {}, "late_signal"),

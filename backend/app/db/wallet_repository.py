@@ -373,9 +373,7 @@ class WalletDataRepository:
             count += 1
         return count
 
-    def upsert_current_positions(
-        self, positions: Iterable[Mapping[str, Any]], run_id: str
-    ) -> int:
+    def upsert_current_positions(self, positions: Iterable[Mapping[str, Any]], run_id: str) -> int:
         count = 0
         for position in positions:
             self.connection.execute(
@@ -414,9 +412,7 @@ class WalletDataRepository:
             count += 1
         return count
 
-    def upsert_closed_positions(
-        self, positions: Iterable[Mapping[str, Any]], run_id: str
-    ) -> int:
+    def upsert_closed_positions(self, positions: Iterable[Mapping[str, Any]], run_id: str) -> int:
         count = 0
         for position in positions:
             self.connection.execute(
@@ -686,6 +682,67 @@ class WalletDataRepository:
             text("SELECT max(trade_timestamp) FROM trades WHERE wallet_address = :wallet"),
             {"wallet": wallet_address},
         ).scalar_one()
+
+    def fetch_pending_paper_trade_targets(
+        self,
+        *,
+        since: datetime,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Return exact markets and tokens for unprocessed strict-paper trades."""
+        rows = self.connection.execute(
+            text(
+                """
+                WITH latest_scores AS (
+                    SELECT DISTINCT ON (wallet_address)
+                        wallet_address, score, confidence, high_confidence_eligible
+                    FROM wallet_scores
+                    ORDER BY wallet_address, scored_at DESC
+                ), paper_wallets AS (
+                    SELECT w.wallet_address
+                    FROM wallets w
+                    LEFT JOIN watchlist_wallets ww
+                        ON ww.wallet_address = w.wallet_address AND ww.status = 'active'
+                    LEFT JOIN latest_scores ls ON ls.wallet_address = w.wallet_address
+                    WHERE ww.wallet_address IS NOT NULL
+                        OR ls.high_confidence_eligible = true
+                        OR (ls.score >= 60 AND ls.confidence >= 0.35)
+                ), candidate_trades AS (
+                    SELECT DISTINCT ON (t.token_id)
+                        t.condition_id, t.token_id, m.gamma_market_id,
+                        t.trade_timestamp, t.trade_uid
+                    FROM paper_wallets pw
+                    JOIN trades t ON t.wallet_address = pw.wallet_address
+                    LEFT JOIN signals s
+                        ON s.source_trade_uid = t.trade_uid
+                        AND s.leader_wallet = t.wallet_address
+                    LEFT JOIN markets m ON m.condition_id = t.condition_id
+                    WHERE t.trade_timestamp >= :since
+                        AND t.condition_id IS NOT NULL
+                        AND t.token_id IS NOT NULL
+                        AND upper(t.side) IN ('BUY', 'SELL')
+                        AND t.price > 0
+                        AND t.size > 0
+                        AND s.signal_id IS NULL
+                    ORDER BY t.token_id, t.trade_timestamp DESC, t.trade_uid
+                )
+                SELECT condition_id, token_id, gamma_market_id, trade_timestamp
+                FROM candidate_trades
+                ORDER BY trade_timestamp DESC, token_id
+                LIMIT :limit
+                """
+            ),
+            {"since": since, "limit": max(limit, 0)},
+        )
+        return [
+            {
+                "condition_id": str(row.condition_id),
+                "token_id": str(row.token_id),
+                "gamma_market_id": (str(row.gamma_market_id) if row.gamma_market_id else ""),
+                "trade_timestamp": row.trade_timestamp,
+            }
+            for row in rows
+        ]
 
     def fetch_paper_token_ids(
         self,

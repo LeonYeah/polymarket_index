@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Engine
@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 from backend.app.analytics.paper_trading import StrategyConfig
 from backend.app.analytics.paper_trading_runner import run_paper_trading
 from backend.app.collectors.incremental_wallet_data import run_incremental_wallet_sync
+from backend.app.collectors.market_data import refresh_priority_market_targets_sync
 from backend.app.collectors.price_data import run_price_archive_sync
 from backend.app.core.config import Settings
 from backend.app.core.run_context import new_run_id
@@ -35,8 +36,14 @@ def run_continuous_sampling_cycle(
     token_limit: int = 30,
     token_recent_hours: int = 168,
     paper_lookback_minutes: int = 120,
+    paper_token_reserve: int | None = None,
 ) -> ContinuousSamplingResult:
     run_id = new_run_id("sampling")
+    token_limit = max(token_limit, 0)
+    configured_reserve = (
+        settings.paper_token_reserve if paper_token_reserve is None else paper_token_reserve
+    )
+    paper_token_reserve = min(max(configured_reserve, 0), token_limit)
     started_at = datetime.now(UTC)
     params = {
         "research_wallet_limit": research_wallet_limit,
@@ -45,8 +52,14 @@ def run_continuous_sampling_cycle(
         "token_limit": token_limit,
         "token_recent_hours": token_recent_hours,
         "paper_lookback_minutes": paper_lookback_minutes,
+        "paper_token_reserve": paper_token_reserve,
     }
-    counters: dict[str, Any] = {"target_tokens": 0}
+    counters: dict[str, Any] = {
+        "target_tokens": 0,
+        "paper_target_tokens": 0,
+        "research_target_tokens": 0,
+        "paper_target_markets": 0,
+    }
     errors: dict[str, str] = {}
     _record_cycle_start(engine, run_id, started_at, params)
 
@@ -64,13 +77,48 @@ def run_continuous_sampling_cycle(
     except Exception as exc:  # noqa: BLE001 - continue with cached DB state.
         errors["wallet_incremental"] = f"{type(exc).__name__}: {exc}"
 
+    paper_targets: list[dict[str, Any]] = []
     try:
         with engine.begin() as connection:
-            tokens = WalletDataRepository(connection).fetch_sampling_token_ids(
+            paper_targets = WalletDataRepository(connection).fetch_pending_paper_trade_targets(
+                since=datetime.now(UTC) - timedelta(minutes=paper_lookback_minutes),
+                limit=paper_token_reserve,
+            )
+        counters["paper_target_tokens"] = len(paper_targets)
+        market_targets = [
+            {
+                "condition_id": str(target["condition_id"]),
+                "gamma_market_id": str(target.get("gamma_market_id") or ""),
+            }
+            for target in paper_targets
+        ]
+        counters["paper_target_markets"] = len(
+            {target["condition_id"] for target in market_targets}
+        )
+        if market_targets:
+            market_result = refresh_priority_market_targets_sync(settings, engine, market_targets)
+            counters["paper_market_refresh"] = market_result.counters
+            if market_result.status != "succeeded":
+                errors["paper_market_refresh"] = market_result.status
+    except Exception as exc:  # noqa: BLE001 - book refresh and paper still run safely.
+        errors["paper_market_refresh"] = f"{type(exc).__name__}: {exc}"
+
+    try:
+        paper_tokens = [str(target["token_id"]) for target in paper_targets]
+        with engine.begin() as connection:
+            sampling_tokens = WalletDataRepository(connection).fetch_sampling_token_ids(
                 limit=token_limit,
                 recent_hours=token_recent_hours,
                 research_wallet_limit=research_wallet_limit,
             )
+        remaining_slots = max(token_limit - len(paper_tokens), 0)
+        paper_token_set = set(paper_tokens)
+        research_tokens = [token for token in sampling_tokens if token not in paper_token_set][
+            :remaining_slots
+        ]
+        tokens = [*paper_tokens, *research_tokens]
+        counters["paper_target_tokens"] = len(paper_tokens)
+        counters["research_target_tokens"] = len(research_tokens)
         counters["target_tokens"] = len(tokens)
         if tokens:
             price_result = run_price_archive_sync(
@@ -102,6 +150,7 @@ def run_continuous_sampling_cycle(
             config=StrategyConfig(
                 maximum_token_notional=settings.paper_maximum_token_notional,
             ),
+            allowed_token_ids=paper_tokens,
         )
         counters["paper_trading"] = paper_result.counters
         if paper_result.status != "completed":

@@ -82,6 +82,7 @@ class MarketContext:
     midpoint: Decimal | None
     snapshot_uid: str | None = None
     compliance_blocked: bool = False
+    metadata_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -372,6 +373,8 @@ def _reject_reason(
 ) -> str | None:
     if market.compliance_blocked:
         return "compliance_block"
+    if not market.metadata_available:
+        return "market_metadata_missing"
     n_resolved = signal.evidence.get("n_resolved")
     if n_resolved is not None and as_decimal(n_resolved) < Decimal("10"):
         return "insufficient_score"

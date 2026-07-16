@@ -135,6 +135,7 @@ def test_schema_records_paper_lifecycle_latency_and_reject_reasons() -> None:
         "wide_spread",
         "stale_data",
         "late_signal",
+        "market_metadata_missing",
         "market_not_accepting_orders",
         "compliance_block",
         "negative_expected_edge",

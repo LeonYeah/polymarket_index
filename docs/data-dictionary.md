@@ -258,7 +258,7 @@ All timestamps must be normalized to UTC. Decimal values should be stored as dec
 | `estimated_fill_price/filled_size` | decimal | Order book | Size-weighted simulated result; never defaults to full fill. |
 | `estimated_slippage` | decimal | Derived | Side-aware difference between midpoint/reference and simulated average fill. |
 | `estimated_fee` | decimal | Derived | Filled notional times the versioned fee assumption. |
-| `reject_reason` | enum | Risk gates | One of the nine Week08 reasons; never free-form for a rejected order. |
+| `reject_reason` | enum | Risk gates | A constrained, explicit risk or data-availability reason; never free-form for a rejected order. |
 | `detection_latency_ms` | integer | Derived | Leader trade time to signal detection. |
 | `decision_latency_ms` | integer | Derived | Signal detection to strategy decision. |
 | `simulation_latency_ms` | integer | Derived | Strategy decision to book simulation completion. |

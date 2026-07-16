@@ -27,6 +27,12 @@ def main() -> None:
     parser.add_argument("--token-limit", type=int, default=30)
     parser.add_argument("--token-recent-hours", type=int, default=168)
     parser.add_argument("--paper-lookback-minutes", type=int, default=120)
+    parser.add_argument(
+        "--paper-token-reserve",
+        type=int,
+        default=None,
+        help="Token slots reserved for unprocessed strict-paper trades; defaults to settings.",
+    )
     parser.add_argument("--database-url", default=None)
     args = parser.parse_args()
 
@@ -46,6 +52,7 @@ def main() -> None:
                     token_limit=args.token_limit,
                     token_recent_hours=args.token_recent_hours,
                     paper_lookback_minutes=args.paper_lookback_minutes,
+                    paper_token_reserve=args.paper_token_reserve,
                 )
                 payload: dict[str, Any] = {**result.__dict__, "cycle": cycle}
             except Exception as exc:  # noqa: BLE001 - survive transient stage failures.
@@ -55,9 +62,7 @@ def main() -> None:
                     "errors": {"cycle": f"{type(exc).__name__}: {exc}"},
                 }
             print(json.dumps(payload, sort_keys=True, default=str), flush=True)
-            if args.repeat_seconds <= 0 or (
-                args.max_cycles > 0 and cycle >= args.max_cycles
-            ):
+            if args.repeat_seconds <= 0 or (args.max_cycles > 0 and cycle >= args.max_cycles):
                 break
             time.sleep(args.repeat_seconds)
     except KeyboardInterrupt:

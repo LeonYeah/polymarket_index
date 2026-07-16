@@ -79,6 +79,7 @@ class PaperTradingRepository:
         *,
         since: datetime,
         limit: int,
+        token_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             text(
@@ -122,6 +123,10 @@ class PaperTradingRepository:
                     AND t.size > 0
                     AND s.signal_id IS NULL
                     AND (
+                        NOT :restrict_tokens
+                        OR t.token_id = ANY(CAST(:token_ids AS text[]))
+                    )
+                    AND (
                         ww.wallet_address IS NOT NULL
                         OR ls.high_confidence_eligible = true
                         OR (ls.score >= 60 AND ls.confidence >= 0.35)
@@ -130,7 +135,12 @@ class PaperTradingRepository:
                 LIMIT :limit
                 """
             ),
-            {"since": since, "limit": limit},
+            {
+                "since": since,
+                "limit": limit,
+                "restrict_tokens": token_ids is not None,
+                "token_ids": token_ids or [],
+            },
         )
         return [dict(row._mapping) for row in rows]
 
@@ -207,6 +217,7 @@ class PaperTradingRepository:
                     liquidity_score=Decimal("0"),
                     spread_bps=None,
                     midpoint=None,
+                    metadata_available=False,
                 ),
                 [],
             )

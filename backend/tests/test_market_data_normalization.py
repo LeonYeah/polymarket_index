@@ -188,3 +188,44 @@ def test_open_paper_market_refresh_uses_direct_gamma_market_endpoint() -> None:
     assert warnings == []
     assert markets[0]["conditionId"] == "0xmarket"  # type: ignore[index]
     assert recorder.calls[0]["endpoint"].endswith("/markets/558936")
+
+
+def test_priority_market_refresh_falls_back_to_condition_id() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/markets"
+        assert request.url.params["condition_ids"] == "0xmissing"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "991",
+                    "conditionId": "0xmissing",
+                    "active": True,
+                    "closed": False,
+                    "acceptingOrders": True,
+                    "clobTokenIds": '["token-1", "token-2"]',
+                    "outcomes": '["Yes", "No"]',
+                }
+            ],
+            request=request,
+        )
+
+    async def run() -> tuple[list[object], int, list[str], RawResponseRecorder]:
+        recorder = RawResponseRecorder()
+        ingestion = MarketDataIngestion(Settings(), engine=None)  # type: ignore[arg-type]
+        warnings: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            markets, failures = await ingestion._fetch_priority_markets(
+                client,
+                "run-1",
+                recorder,  # type: ignore[arg-type]
+                [{"condition_id": "0xmissing", "gamma_market_id": ""}],
+                warnings,
+            )
+        return list(markets), failures, warnings, recorder
+
+    markets, failures, warnings, recorder = asyncio.run(run())
+    assert failures == 0
+    assert warnings == []
+    assert markets[0]["conditionId"] == "0xmissing"  # type: ignore[index]
+    assert recorder.calls[0]["request_params"] == {"condition_ids": "0xmissing"}

@@ -541,6 +541,84 @@ class MarketDataIngestion:
                 repository.finish_run(run_id, "failed", finished_at, counters, str(exc))
                 raise
 
+    async def run_priority_refresh(
+        self,
+        targets: list[dict[str, str]],
+    ) -> IngestionResult:
+        run_id = new_run_id("paper_market")
+        started_at = utc_now()
+        deduped_targets = list(
+            {
+                target["condition_id"]: target for target in targets if target.get("condition_id")
+            }.values()
+        )
+        counters = {
+            "events": 0,
+            "markets": 0,
+            "tokens": 0,
+            "liquidity_snapshots": 0,
+            "priority_markets_requested": len(deduped_targets),
+            "priority_markets_refreshed": 0,
+            "priority_market_failures": 0,
+            "raw_responses": 0,
+        }
+        warnings: list[str] = []
+        with self.engine.begin() as connection:
+            repository = MarketDataRepository(connection)
+            repository.start_run(
+                run_id,
+                "paper_market_refresh",
+                "polymarket",
+                started_at,
+                {"targets": deduped_targets},
+            )
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self.settings.api_probe_timeout_seconds
+                ) as client:
+                    markets, failures = await self._fetch_priority_markets(
+                        client, run_id, repository, deduped_targets, warnings
+                    )
+                counters["priority_markets_refreshed"] = len(markets)
+                counters["priority_market_failures"] = failures
+                counters["raw_responses"] = len(markets)
+                normalized_events: list[dict[str, Any]] = []
+                normalized_markets: list[dict[str, Any]] = []
+                normalized_tokens: list[dict[str, Any]] = []
+                market_snapshots: list[dict[str, Any]] = []
+                snapshot_at = utc_now()
+                for raw_market in markets:
+                    market, embedded_events, tokens = normalize_market_bundle(raw_market, run_id)
+                    if market:
+                        normalized_markets.append(market)
+                        normalized_events.extend(embedded_events)
+                        normalized_tokens.extend(tokens)
+                    snapshot = normalize_market_snapshot(raw_market, run_id, snapshot_at)
+                    if snapshot:
+                        market_snapshots.append(snapshot)
+                counters["events"] = repository.upsert_events(
+                    _dedupe_by(normalized_events, "gamma_event_id"), run_id
+                )
+                counters["markets"] = repository.upsert_markets(normalized_markets, run_id)
+                counters["tokens"] = repository.upsert_tokens(normalized_tokens, run_id)
+                counters["liquidity_snapshots"] = repository.insert_liquidity_snapshots(
+                    market_snapshots, run_id
+                )
+                finished_at = utc_now()
+                status = "succeeded" if failures == 0 else "degraded"
+                repository.finish_run(
+                    run_id,
+                    status,
+                    finished_at,
+                    counters,
+                    None if not warnings else ";".join(warnings),
+                )
+                return IngestionResult(run_id, status, counters, started_at, finished_at, warnings)
+            except Exception as exc:
+                finished_at = utc_now()
+                repository.finish_run(run_id, "failed", finished_at, counters, str(exc))
+                raise
+
     async def _fetch_priority_markets(
         self,
         client: httpx.AsyncClient,
@@ -555,21 +633,39 @@ class MarketDataIngestion:
         for target in targets:
             condition_id = target["condition_id"]
             gamma_market_id = target["gamma_market_id"]
-            if not gamma_market_id:
-                failures += 1
-                warnings.append(f"priority_market_missing_gamma_id:{condition_id}")
-                continue
             try:
-                payload = await self._fetch_json(
-                    client,
-                    repository,
-                    run_id,
-                    "gamma",
-                    f"{gamma_base}/markets/{gamma_market_id}",
-                    {},
-                    "market",
-                    absolute_url=True,
-                )
+                if gamma_market_id:
+                    payload = await self._fetch_json(
+                        client,
+                        repository,
+                        run_id,
+                        "gamma",
+                        f"{gamma_base}/markets/{gamma_market_id}",
+                        {},
+                        "market",
+                        absolute_url=True,
+                    )
+                else:
+                    candidates = await self._fetch_json(
+                        client,
+                        repository,
+                        run_id,
+                        "gamma",
+                        f"{gamma_base}/markets",
+                        {"condition_ids": condition_id},
+                        "markets",
+                        absolute_url=True,
+                    )
+                    payload = next(
+                        (
+                            item
+                            for item in first_list(candidates, "markets")
+                            if isinstance(item, Mapping)
+                            and str(item.get("conditionId") or item.get("condition_id"))
+                            == condition_id
+                        ),
+                        None,
+                    )
             except (httpx.HTTPError, ValueError) as exc:
                 failures += 1
                 warnings.append(
@@ -779,3 +875,19 @@ async def run_market_ingestion(
 
 def run_market_ingestion_sync(settings: Settings, engine: Engine, **kwargs: Any) -> IngestionResult:
     return asyncio.run(run_market_ingestion(settings, engine, **kwargs))
+
+
+async def refresh_priority_market_targets(
+    settings: Settings,
+    engine: Engine,
+    targets: list[dict[str, str]],
+) -> IngestionResult:
+    return await MarketDataIngestion(settings, engine).run_priority_refresh(targets)
+
+
+def refresh_priority_market_targets_sync(
+    settings: Settings,
+    engine: Engine,
+    targets: list[dict[str, str]],
+) -> IngestionResult:
+    return asyncio.run(refresh_priority_market_targets(settings, engine, targets))

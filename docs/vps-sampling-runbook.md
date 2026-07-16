@@ -82,21 +82,22 @@ PnL 和 SmartScore 使用上一份可用快照继续刷新。
 连续周期按以下顺序运行：
 
 1. 对 Top 25 研究钱包和严格 paper 钱包始终从 Data API `/trades` offset 0 拉取最新页，避免历史 backfill exhausted checkpoint 漏掉新交易。
-2. 从 watchlist 市场、两个钱包池的近期交易和 pending signal 选择相关 token。
-3. 对 token 采集当前 CLOB `/book`，计算有限档深度与 followability。
-4. 运行 FAK paper cycle，记录 signal、拒单/模拟成交、延迟、仓位和 PnL。
-5. CLOB 失败 token 冷却 15 分钟后自动重试，避免每分钟重复请求已失效 book。
+2. 提取尚未生成 signal 的严格 paper 交易，最多取 `PAPER_TOKEN_RESERVE` 个不同 token；先按 Gamma market id 精确刷新，缺少 id 时按 condition id 回退。
+3. 将这些 paper token 放在订单簿队列最前，研究 token 只填充总计 30 个槽位中的剩余部分，再采集精确 CLOB `/book` 与 followability。
+4. FAK paper cycle 只处理本轮已获得 paper 槽位的 token；超出配额的未处理交易留到下一轮，不会用陈旧数据提前拒单。
+5. 记录 signal、拒单/模拟成交、延迟、仓位和 PnL；CLOB 失败 token 冷却 15 分钟后自动重试。
 
 风险与结算规则：
 
-- `PAPER_MAXIMUM_TOKEN_NOTIONAL` 控制单 strategy/token 的累计 open cost basis，生产默认 `100`
-  USDC；剩余额度不足时缩小模拟成交，低于最小下单额时以 `token_exposure_limit` 拒单。
+- `PAPER_TOKEN_RESERVE` 控制严格 paper 新交易在 30-token 总预算中的保留槽位，生产默认 `10`；market metadata 与精确订单簿均在 decision 前刷新。
+- 缺失本地市场元数据时明确拒绝为 `market_metadata_missing`；只有已存在市场明确返回 `accepting_orders=false` 时才使用 `market_not_accepting_orders`。
+- `PAPER_MAXIMUM_TOKEN_NOTIONAL` 控制单 strategy/token 的累计 open cost basis，生产默认 `100` USDC；剩余额度不足时缩小模拟成交，低于最小下单额时以 `token_exposure_limit` 拒单。
 - 每次市场维护先读取全部 open paper position，按 Gamma market id 直接刷新这些市场；该结果
   优先于常规分页数据且不占用常规 `max_markets` 配额。
 - PnL 阶段根据 `outcomes`、`outcomePrices` 和关闭时间写入 winning outcome 与 resolution；后续
   paper valuation 将关联订单与仓位推进到 `settled`。
 
-最后一次部署重启后，连续验收起点为 `2026-07-15 10:15:13 UTC`。在至少运行至 `2026-07-22 10:15:13 UTC` 且 freshness、失败周期和数据质量复核通过前，不宣称完成 7 天验收。
+最后一次部署重启后，连续验收起点为 `2026-07-16 07:06:54 UTC`。在至少运行至 `2026-07-23 07:06:54 UTC` 且 freshness、失败周期和数据质量复核通过前，不宣称完成 7 天验收。
 
 ## 备份与恢复
 

@@ -36,6 +36,7 @@ def run_paper_trading(
     valuation_limit: int = 1000,
     order_type: OrderType = "FAK",
     config: StrategyConfig | None = None,
+    allowed_token_ids: list[str] | None = None,
 ) -> PaperTradingRunResult:
     config = config or StrategyConfig()
     run_id = new_run_id("paper")
@@ -57,6 +58,7 @@ def run_paper_trading(
         "valuation_limit": valuation_limit,
         "order_type": order_type,
         "strategy_version": config.strategy_version,
+        "allowed_token_ids": allowed_token_ids,
     }
     status = "completed"
     error: str | None = None
@@ -74,6 +76,7 @@ def run_paper_trading(
                     valuation_limit=valuation_limit,
                     order_type=order_type,
                     config=config,
+                    allowed_token_ids=allowed_token_ids,
                     counters=counters,
                 )
         except Exception as exc:
@@ -101,6 +104,7 @@ def _execute_cycle(
     valuation_limit: int,
     order_type: OrderType,
     config: StrategyConfig,
+    allowed_token_ids: list[str] | None,
     counters: dict[str, int],
 ) -> None:
     counters["expired_orders"] = repository.expire_gtc_orders(
@@ -110,6 +114,7 @@ def _execute_cycle(
     rows = repository.fetch_signal_candidates(
         since=started_at - timedelta(minutes=lookback_minutes),
         limit=signal_limit,
+        token_ids=allowed_token_ids,
     )
     counters["candidate_trades"] = len(rows)
     raw_signals = [build_signal(row, detected_at=started_at) for row in rows]

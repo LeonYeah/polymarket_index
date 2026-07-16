@@ -68,6 +68,11 @@ class Settings(BaseSettings):
         gt=0,
         description="Maximum open paper cost basis per strategy and token in USDC.",
     )
+    paper_token_reserve: int = Field(
+        default=10,
+        ge=0,
+        description="Token slots reserved for unprocessed strict-paper wallet trades.",
+    )
 
 
 @lru_cache

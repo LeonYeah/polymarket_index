@@ -95,6 +95,9 @@ def test_continuous_cycle_keeps_paper_running_when_price_stage_degrades(
         def __init__(self, _connection: object) -> None:
             pass
 
+        def fetch_pending_paper_trade_targets(self, **_kwargs: object) -> list[dict[str, object]]:
+            return []
+
         def fetch_sampling_token_ids(self, **_kwargs: object) -> list[str]:
             return ["token-1"]
 
@@ -109,7 +112,9 @@ def test_continuous_cycle_keeps_paper_running_when_price_stage_degrades(
     monkeypatch.setattr(continuous_sampling, "_record_cycle_start", lambda *a, **k: None)
     monkeypatch.setattr(continuous_sampling, "_record_cycle_finish", lambda *a, **k: None)
     monkeypatch.setattr(continuous_sampling, "WalletDataRepository", TargetRepository)
-    monkeypatch.setattr(continuous_sampling, "run_incremental_wallet_sync", lambda *a, **k: Result())
+    monkeypatch.setattr(
+        continuous_sampling, "run_incremental_wallet_sync", lambda *a, **k: Result()
+    )
     monkeypatch.setattr(
         continuous_sampling,
         "run_price_archive_sync",
@@ -122,3 +127,74 @@ def test_continuous_cycle_keeps_paper_running_when_price_stage_degrades(
     assert result.status == "degraded"
     assert "clob unavailable" in result.errors["price_archive"]
     assert result.counters["paper_trading"] == {"orders": 1}
+
+
+def test_continuous_cycle_reserves_paper_tokens_before_research_tokens(
+    monkeypatch: Any,
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class TargetRepository:
+        def __init__(self, _connection: object) -> None:
+            pass
+
+        def fetch_pending_paper_trade_targets(self, **_kwargs: object) -> list[dict[str, object]]:
+            return [
+                {
+                    "condition_id": "market-1",
+                    "token_id": "paper-1",
+                    "gamma_market_id": "",
+                },
+                {
+                    "condition_id": "market-2",
+                    "token_id": "paper-2",
+                    "gamma_market_id": "22",
+                },
+            ]
+
+        def fetch_sampling_token_ids(self, **_kwargs: object) -> list[str]:
+            return ["paper-2", "research-1", "research-2"]
+
+    class Result:
+        status = "succeeded"
+        counters = {"rows": 1}
+
+    class PaperResult:
+        status = "completed"
+        counters = {"orders": 1}
+
+    def refresh_markets(_settings: object, _engine: object, targets: object) -> Result:
+        calls.append(("markets", targets))
+        return Result()
+
+    def archive_books(*_args: object, **kwargs: object) -> Result:
+        calls.append(("books", kwargs["token_ids"]))
+        return Result()
+
+    def run_paper(*_args: object, **kwargs: object) -> PaperResult:
+        calls.append(("paper", kwargs["allowed_token_ids"]))
+        return PaperResult()
+
+    monkeypatch.setattr(continuous_sampling, "_record_cycle_start", lambda *a, **k: None)
+    monkeypatch.setattr(continuous_sampling, "_record_cycle_finish", lambda *a, **k: None)
+    monkeypatch.setattr(continuous_sampling, "WalletDataRepository", TargetRepository)
+    monkeypatch.setattr(
+        continuous_sampling, "run_incremental_wallet_sync", lambda *a, **k: Result()
+    )
+    monkeypatch.setattr(
+        continuous_sampling, "refresh_priority_market_targets_sync", refresh_markets
+    )
+    monkeypatch.setattr(continuous_sampling, "run_price_archive_sync", archive_books)
+    monkeypatch.setattr(continuous_sampling, "run_paper_trading", run_paper)
+
+    result = continuous_sampling.run_continuous_sampling_cycle(
+        Settings(paper_token_reserve=2), _Engine(), token_limit=3
+    )
+
+    assert result.status == "succeeded"
+    assert result.counters["paper_target_tokens"] == 2
+    assert result.counters["research_target_tokens"] == 1
+    assert result.counters["target_tokens"] == 3
+    assert calls[0][0] == "markets"
+    assert calls[1] == ("books", ["paper-1", "paper-2", "research-1"])
+    assert calls[2] == ("paper", ["paper-1", "paper-2"])

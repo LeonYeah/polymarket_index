@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, text
 
-SCHEMA_VERSION = "2026_07_15_paper_risk_and_resolution_v1"
+SCHEMA_VERSION = "2026_07_16_paper_target_refresh_v1"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -852,7 +852,8 @@ CREATE TABLE IF NOT EXISTS paper_orders (
     reject_reason text CHECK (
         reject_reason IS NULL OR reject_reason IN (
             'insufficient_score', 'low_confidence', 'low_liquidity', 'wide_spread',
-            'stale_data', 'late_signal', 'market_not_accepting_orders',
+            'stale_data', 'late_signal', 'market_metadata_missing',
+            'market_not_accepting_orders',
             'compliance_block', 'negative_expected_edge', 'token_exposure_limit'
         )
     ),
@@ -948,7 +949,8 @@ ALTER TABLE paper_orders DROP CONSTRAINT IF EXISTS paper_orders_reject_reason_ch
 ALTER TABLE paper_orders ADD CONSTRAINT paper_orders_reject_reason_check CHECK (
     reject_reason IS NULL OR reject_reason IN (
         'insufficient_score', 'low_confidence', 'low_liquidity', 'wide_spread',
-        'stale_data', 'late_signal', 'market_not_accepting_orders',
+        'stale_data', 'late_signal', 'market_metadata_missing',
+        'market_not_accepting_orders',
         'compliance_block', 'negative_expected_edge', 'token_exposure_limit'
     )
 );
